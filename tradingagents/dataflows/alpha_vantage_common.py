@@ -1,5 +1,7 @@
 import json
 import os
+import threading
+import time
 from datetime import datetime
 from io import StringIO
 
@@ -13,6 +15,11 @@ API_BASE_URL = "https://www.alphavantage.co/query"
 # Network timeout (seconds) so a stalled Alpha Vantage request can't hang the
 # CLI/agents indefinitely (#990).
 REQUEST_TIMEOUT = 30
+_REQUEST_LOCK = threading.Lock()
+_LAST_REQUEST_AT = 0.0
+_DEFAULT_MIN_INTERVAL_SECONDS = 13.0
+_DEFAULT_MAX_RETRIES = 1
+_DEFAULT_RETRY_DELAY_SECONDS = 65.0
 
 
 class AlphaVantageNotConfiguredError(VendorNotConfiguredError):
@@ -59,6 +66,47 @@ class AlphaVantageRateLimitError(VendorRateLimitError):
     """Raised when the Alpha Vantage API rate limit is exceeded."""
     pass
 
+
+def _throttle_request() -> None:
+    """Serialize Alpha Vantage calls so concurrent tools don't trip free-tier limits."""
+    global _LAST_REQUEST_AT
+    raw_interval = os.getenv("ALPHA_VANTAGE_MIN_INTERVAL_SECONDS")
+    try:
+        min_interval = float(raw_interval) if raw_interval else _DEFAULT_MIN_INTERVAL_SECONDS
+    except ValueError:
+        min_interval = _DEFAULT_MIN_INTERVAL_SECONDS
+    if min_interval <= 0:
+        return
+    with _REQUEST_LOCK:
+        elapsed = time.monotonic() - _LAST_REQUEST_AT
+        if elapsed < min_interval:
+            time.sleep(min_interval - elapsed)
+        _LAST_REQUEST_AT = time.monotonic()
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    try:
+        return float(raw) if raw else default
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    try:
+        return int(raw) if raw else default
+    except ValueError:
+        return default
+
+
+def _is_retryable_rate_limit(notice: str) -> bool:
+    low = notice.lower()
+    if "premium" in low:
+        return False
+    return "call frequency" in low or "rate limit" in low or "requests per day" in low
+
+
 def _make_api_request(function_name: str, params: dict) -> dict | str:
     """Helper function to make API requests and handle responses.
 
@@ -83,33 +131,45 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
         # Remove entitlement if it's None or empty
         api_params.pop("entitlement", None)
 
-    response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
+    max_retries = max(0, _env_int("ALPHA_VANTAGE_MAX_RETRIES", _DEFAULT_MAX_RETRIES))
+    retry_delay = max(0.0, _env_float("ALPHA_VANTAGE_RETRY_DELAY_SECONDS", _DEFAULT_RETRY_DELAY_SECONDS))
 
-    response_text = response.text
+    for attempt in range(max_retries + 1):
+        _throttle_request()
+        response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
 
-    # Error responses are JSON; data responses are usually CSV (or data-keyed
-    # JSON). A non-JSON body is normal data.
-    try:
-        response_json = json.loads(response_text)
-    except json.JSONDecodeError:
-        return response_text
+        response_text = response.text
 
-    # Alpha Vantage reports problems via "Information" / "Note". Classify so a
-    # genuine rate limit and an invalid/missing key aren't conflated (#991):
-    # rate-limit phrasing is checked first because those notices also mention
-    # "API key" ("your API key ... 25 requests per day").
-    notice = response_json.get("Information") or response_json.get("Note")
-    if notice:
+        # Error responses are JSON; data responses are usually CSV (or data-keyed
+        # JSON). A non-JSON body is normal data.
+        try:
+            response_json = json.loads(response_text)
+        except json.JSONDecodeError:
+            return response_text
+
+        # Alpha Vantage reports problems via "Information" / "Note". Classify so a
+        # genuine rate limit and an invalid/missing key aren't conflated (#991):
+        # rate-limit phrasing is checked first because those notices also mention
+        # "API key" ("your API key ... 25 requests per day").
+        notice = response_json.get("Information") or response_json.get("Note")
+        if not notice:
+            return response_text
+
         low = notice.lower()
-        if any(m in low for m in ("rate limit", "requests per day", "call frequency", "premium")):
-            raise AlphaVantageRateLimitError(f"Alpha Vantage rate limit exceeded: {notice}")
         if "api key" in low or "apikey" in low:
             # Reuse the existing "not configured" error so a bad key surfaces as
             # a real, actionable failure rather than a mislabeled rate limit (#991).
             raise AlphaVantageNotConfiguredError(f"Alpha Vantage API key invalid or missing: {notice}")
+        if any(m in low for m in ("rate limit", "requests per day", "call frequency", "premium")):
+            if _is_retryable_rate_limit(notice) and attempt < max_retries:
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            raise AlphaVantageRateLimitError(f"Alpha Vantage rate limit exceeded: {notice}")
 
-    return response_text
+        return response_text
+
+    raise AlphaVantageRateLimitError("Alpha Vantage rate limit exceeded after retries.")
 
 
 

@@ -1,5 +1,10 @@
+import os
 from datetime import datetime
-from .alpha_vantage_common import _make_api_request, _filter_csv_by_date_range
+from .alpha_vantage_common import (
+    AlphaVantageRateLimitError,
+    _filter_csv_by_date_range,
+    _make_api_request,
+)
 
 def get_stock(
     symbol: str,
@@ -7,8 +12,7 @@ def get_stock(
     end_date: str
 ) -> str:
     """
-    Returns raw daily OHLCV values, adjusted close values, and historical split/dividend events
-    filtered to the specified date range.
+    Returns daily OHLCV values filtered to the specified date range.
 
     Args:
         symbol: The name of the equity. For example: symbol=IBM
@@ -16,7 +20,7 @@ def get_stock(
         end_date: End date in yyyy-mm-dd format
 
     Returns:
-        CSV string containing the daily adjusted time series data filtered to the date range.
+        CSV string containing the daily time series data filtered to the date range.
     """
     # Parse dates to determine the range
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
@@ -33,6 +37,17 @@ def get_stock(
         "datatype": "csv",
     }
 
-    response = _make_api_request("TIME_SERIES_DAILY_ADJUSTED", params)
+    use_adjusted = os.getenv("ALPHA_VANTAGE_USE_ADJUSTED_DAILY", "").strip().lower()
+    if use_adjusted in {"1", "true", "yes", "on"}:
+        try:
+            response = _make_api_request("TIME_SERIES_DAILY_ADJUSTED", params)
+        except AlphaVantageRateLimitError as exc:
+            if "premium endpoint" not in str(exc).lower():
+                raise
+            # Free Alpha Vantage keys may not include adjusted close/dividend data.
+            # Fall back to the basic daily OHLCV endpoint so price analysis can run.
+            response = _make_api_request("TIME_SERIES_DAILY", params)
+    else:
+        response = _make_api_request("TIME_SERIES_DAILY", params)
 
     return _filter_csv_by_date_range(response, start_date, end_date)

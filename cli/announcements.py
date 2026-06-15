@@ -1,7 +1,8 @@
 import getpass
 import requests
 from rich.console import Console
-from rich.panel import Panel
+
+from cli.theme import PALETTE, make_panel
 
 from cli.config import CLI_CONFIG
 
@@ -37,9 +38,9 @@ def display_announcements(console: Console, data: dict) -> None:
 
     content = "\n".join(announcements)
 
-    panel = Panel(
+    panel = make_panel(
         content,
-        border_style="cyan",
+        border_style=PALETTE["violet"],
         padding=(1, 2),
         title="Announcements",
     )

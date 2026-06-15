@@ -42,7 +42,27 @@ def _apply_env_overrides(config: dict) -> dict:
     return config
 
 
-DEFAULT_CONFIG = _apply_env_overrides({
+def _apply_data_vendor_env(config: dict) -> dict:
+    """Apply one ordered market-data vendor chain to all supported categories."""
+    chain = os.environ.get("TRADINGAGENTS_DATA_VENDOR_CHAIN")
+    if not chain:
+        return config
+    market_data_categories = (
+        "core_stock_apis",
+        "technical_indicators",
+        "fundamental_data",
+        "news_data",
+    )
+    vendors = config.setdefault("data_vendors", {})
+    for category in market_data_categories:
+        vendors[category] = chain
+    macro_chain = os.environ.get("TRADINGAGENTS_MACRO_VENDOR_CHAIN")
+    if macro_chain:
+        vendors["macro_data"] = macro_chain
+    return config
+
+
+DEFAULT_CONFIG = _apply_data_vendor_env(_apply_env_overrides({
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
@@ -100,13 +120,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Category-level configuration (default for all tools in category).
     # The configured value is the exact vendor chain — requests are NOT silently
     # routed to vendors you didn't choose. For ordered fallback, list several,
-    # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
+    # e.g. "eastmoney,alpha_vantage,yfinance". "default" uses all available vendors.
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
+        "core_stock_apis": "yfinance",       # Options: eastmoney, alpha_vantage, yfinance
+        "technical_indicators": "yfinance",  # Options: eastmoney, alpha_vantage, yfinance
         "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
         "news_data": "yfinance",             # Options: alpha_vantage, yfinance
-        "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
+        "macro_data": "fred",                # Options: chinabond_web, tushare, fred, local_note
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },
     # Tool-level configuration (takes precedence over category-level)
@@ -132,4 +152,4 @@ DEFAULT_CONFIG = _apply_env_overrides({
         ".SZ":  "399001.SZ",   # Shenzhen (SZSE Component)
         "":     "SPY",         # default for US-listed tickers (no suffix)
     },
-})
+}))

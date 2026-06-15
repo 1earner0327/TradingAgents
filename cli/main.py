@@ -6,20 +6,16 @@ import questionary
 from pathlib import Path
 from functools import wraps
 from rich.console import Console
-from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.live import Live
-from rich.columns import Columns
 from rich.markdown import Markdown
 from rich.layout import Layout
 from rich.text import Text
 from rich.table import Table
 from collections import deque
 import time
-from rich.tree import Tree
 from rich import box
 from rich.align import Align
-from rich.rule import Rule
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.graph.analyst_execution import (
@@ -33,8 +29,18 @@ from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
+from cli.theme import (
+    PALETTE,
+    brand_header,
+    env_notice,
+    make_panel,
+    report_section_header,
+    status_renderable,
+    step_panel,
+    welcome_panel,
+)
 
-console = Console()
+console = Console(highlight=False)
 
 app = typer.Typer(
     name="TradingAgents",
@@ -84,6 +90,10 @@ class MessageBuffer:
         self.report_sections = {}
         self.selected_analysts = []
         self._processed_message_ids = set()
+        self.session_context = {}
+
+    def set_session_context(self, **kwargs):
+        self.session_context.update({k: v for k, v in kwargs.items() if v is not None})
 
     def init_for_analysis(self, selected_analysts):
         """Initialize agent status and report sections based on selected analysts.
@@ -236,15 +246,15 @@ message_buffer = MessageBuffer()
 def create_layout():
     layout = Layout()
     layout.split_column(
-        Layout(name="header", size=3),
+        Layout(name="header", size=4),
         Layout(name="main"),
         Layout(name="footer", size=3),
     )
     layout["main"].split_column(
-        Layout(name="upper", ratio=3), Layout(name="analysis", ratio=5)
+        Layout(name="upper", ratio=4), Layout(name="analysis", ratio=6)
     )
     layout["upper"].split_row(
-        Layout(name="progress", ratio=2), Layout(name="messages", ratio=3)
+        Layout(name="progress", ratio=5), Layout(name="messages", ratio=6)
     )
     return layout
 
@@ -257,31 +267,21 @@ def format_tokens(n):
 
 
 def update_display(layout, spinner_text=None, stats_handler=None, start_time=None):
-    # Header with welcome message
-    layout["header"].update(
-        Panel(
-            "[bold green]Welcome to TradingAgents CLI[/bold green]\n"
-            "[dim]© [Tauric Research](https://github.com/TauricResearch)[/dim]",
-            title="Welcome to TradingAgents",
-            border_style="green",
-            padding=(1, 2),
-            expand=True,
-        )
-    )
+    layout["header"].update(brand_header(message_buffer.session_context))
 
     # Progress panel showing agent status
     progress_table = Table(
         show_header=True,
-        header_style="bold magenta",
+        header_style=f"bold {PALETTE['muted']}",
         show_footer=False,
-        box=box.SIMPLE_HEAD,  # Use simple header with horizontal lines
-        title=None,  # Remove the redundant Progress title
-        padding=(0, 2),  # Add horizontal padding
-        expand=True,  # Make table expand to fill available space
+        box=box.SIMPLE,
+        padding=(0, 1),
+        expand=True,
+        show_lines=True,
     )
-    progress_table.add_column("Team", style="cyan", justify="center", width=20)
-    progress_table.add_column("Agent", style="green", justify="center", width=20)
-    progress_table.add_column("Status", style="yellow", justify="center", width=20)
+    progress_table.add_column("Desk", style=PALETTE["muted"], width=18)
+    progress_table.add_column("Agent", style=PALETTE["ink"], ratio=1)
+    progress_table.add_column("State", justify="right", width=12)
 
     # Group agents by team - filter to only include agents in agent_status
     all_teams = {
@@ -310,57 +310,61 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         status = message_buffer.agent_status.get(first_agent, "pending")
         if status == "in_progress":
             spinner = Spinner(
-                "dots", text="[blue]in_progress[/blue]", style="bold cyan"
+                "dots",
+                text=Text("ANALYZING", style=f"bold {PALETTE['primary']}"),
+                style=PALETTE["primary"],
             )
             status_cell = spinner
         else:
-            status_color = {
-                "pending": "yellow",
-                "completed": "green",
-                "error": "red",
-            }.get(status, "white")
-            status_cell = f"[{status_color}]{status}[/{status_color}]"
-        progress_table.add_row(team, first_agent, status_cell)
+            status_cell = status_renderable(status)
+        progress_table.add_row(
+            Text(team, style=f"bold {PALETTE['secondary']}"),
+            Text(first_agent, style=PALETTE["ink"]),
+            status_cell,
+        )
 
         # Add remaining agents in team
         for agent in agents[1:]:
             status = message_buffer.agent_status.get(agent, "pending")
             if status == "in_progress":
                 spinner = Spinner(
-                    "dots", text="[blue]in_progress[/blue]", style="bold cyan"
+                    "dots",
+                    text=Text("ANALYZING", style=f"bold {PALETTE['primary']}"),
+                    style=PALETTE["primary"],
                 )
                 status_cell = spinner
             else:
-                status_color = {
-                    "pending": "yellow",
-                    "completed": "green",
-                    "error": "red",
-                }.get(status, "white")
-                status_cell = f"[{status_color}]{status}[/{status_color}]"
-            progress_table.add_row("", agent, status_cell)
-
-        # Add horizontal line after each team
-        progress_table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
+                status_cell = status_renderable(status)
+            progress_table.add_row(
+                "",
+                Text(agent, style=PALETTE["ink"]),
+                status_cell,
+            )
 
     layout["progress"].update(
-        Panel(progress_table, title="Progress", border_style="cyan", padding=(1, 2))
+        make_panel(
+            progress_table,
+            title="Agent Matrix",
+            border_style=PALETTE["primary"],
+            padding=(1, 2),
+        )
     )
 
     # Messages panel showing recent messages and tool calls
     messages_table = Table(
         show_header=True,
-        header_style="bold magenta",
+        header_style=f"bold {PALETTE['muted']}",
         show_footer=False,
-        expand=True,  # Make table expand to fill available space
-        box=box.MINIMAL,  # Use minimal box style for a lighter look
-        show_lines=True,  # Keep horizontal lines
-        padding=(0, 1),  # Add some padding between columns
+        expand=True,
+        box=box.SIMPLE,
+        show_lines=True,
+        padding=(0, 1),
     )
-    messages_table.add_column("Time", style="cyan", width=8, justify="center")
-    messages_table.add_column("Type", style="green", width=10, justify="center")
+    messages_table.add_column("Time", style=PALETTE["faint"], width=8, justify="center")
+    messages_table.add_column("Kind", width=10, justify="center")
     messages_table.add_column(
-        "Content", style="white", no_wrap=False, ratio=1
-    )  # Make content column expand
+        "Signal", style=PALETTE["ink"], no_wrap=False, ratio=1
+    )
 
     # Combine tool calls and messages
     all_messages = []
@@ -389,14 +393,24 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     # Add messages to table (already in newest-first order)
     for timestamp, msg_type, content in recent_messages:
         # Format content with word wrapping
-        wrapped_content = Text(content, overflow="fold")
-        messages_table.add_row(timestamp, msg_type, wrapped_content)
+        wrapped_content = Text(content, overflow="fold", style=PALETTE["ink"])
+        type_style = {
+            "Tool": PALETTE["accent"],
+            "System": PALETTE["secondary"],
+            "Reasoning": PALETTE["violet"],
+            "Analysis": PALETTE["primary"],
+        }.get(msg_type, PALETTE["muted"])
+        messages_table.add_row(
+            Text(timestamp, style=PALETTE["faint"]),
+            Text(msg_type, style=f"bold {type_style}"),
+            wrapped_content,
+        )
 
     layout["messages"].update(
-        Panel(
+        make_panel(
             messages_table,
-            title="Messages & Tools",
-            border_style="blue",
+            title="Signal Feed",
+            border_style=PALETTE["violet"],
             padding=(1, 2),
         )
     )
@@ -404,19 +418,27 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     # Analysis panel showing current report
     if message_buffer.current_report:
         layout["analysis"].update(
-            Panel(
+            make_panel(
                 Markdown(message_buffer.current_report),
-                title="Current Report",
-                border_style="green",
+                title="Latest Research Memo",
+                border_style=PALETTE["success"],
                 padding=(1, 2),
             )
         )
     else:
+        waiting = Align.center(
+            Text(
+                "Awaiting first analyst memo\nReports will stream here as agents complete their work",
+                style=PALETTE["faint"],
+                justify="center",
+            ),
+            vertical="middle",
+        )
         layout["analysis"].update(
-            Panel(
-                "[italic]Waiting for analysis report...[/italic]",
-                title="Current Report",
-                border_style="green",
+            make_panel(
+                waiting,
+                title="Latest Research Memo",
+                border_style=PALETTE["success"],
                 padding=(1, 2),
             )
         )
@@ -458,9 +480,11 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
 
     stats_table = Table(show_header=False, box=None, padding=(0, 2), expand=True)
     stats_table.add_column("Stats", justify="center")
-    stats_table.add_row(" | ".join(stats_parts))
+    stats_table.add_row(Text(" | ".join(stats_parts), style=PALETTE["muted"]))
 
-    layout["footer"].update(Panel(stats_table, border_style="grey50"))
+    layout["footer"].update(
+        make_panel(stats_table, border_style=PALETTE["panel"], padding=(0, 2))
+    )
 
 
 def get_user_selections():
@@ -469,24 +493,7 @@ def get_user_selections():
     with open(Path(__file__).parent / "static" / "welcome.txt", "r", encoding="utf-8") as f:
         welcome_ascii = f.read()
 
-    # Create welcome box content
-    welcome_content = f"{welcome_ascii}\n"
-    welcome_content += "[bold green]TradingAgents: Multi-Agents LLM Financial Trading Framework - CLI[/bold green]\n\n"
-    welcome_content += "[bold]Workflow Steps:[/bold]\n"
-    welcome_content += "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
-    welcome_content += (
-        "[dim]Built by [Tauric Research](https://github.com/TauricResearch)[/dim]"
-    )
-
-    # Create and center the welcome box
-    welcome_box = Panel(
-        welcome_content,
-        border_style="green",
-        padding=(1, 2),
-        title="Welcome to TradingAgents",
-        subtitle="Multi-Agents LLM Financial Trading Framework",
-    )
-    console.print(Align.center(welcome_box))
+    console.print(welcome_panel(welcome_ascii))
     console.print()
     console.print()  # Add vertical space before announcements
 
@@ -494,18 +501,11 @@ def get_user_selections():
     announcements = fetch_announcements()
     display_announcements(console, announcements)
 
-    # Create a boxed questionnaire for each step
-    def create_question_box(title, prompt, default=None):
-        box_content = f"[bold]{title}[/bold]\n"
-        box_content += f"[dim]{prompt}[/dim]"
-        if default:
-            box_content += f"\n[dim]Default: {default}[/dim]"
-        return Panel(box_content, border_style="blue", padding=(1, 2))
-
     # Step 1: Ticker symbol
     console.print(
-        create_question_box(
-            "Step 1: Ticker Symbol",
+        step_panel(
+            1,
+            "Ticker Symbol",
             "Enter the ticker, with exchange suffix when needed (e.g. SPY, 0700.HK, BTC-USD)",
             "SPY",
         )
@@ -522,8 +522,9 @@ def get_user_selections():
     # Step 2: Analysis date
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
     console.print(
-        create_question_box(
-            "Step 2: Analysis Date",
+        step_panel(
+            2,
+            "Analysis Date",
             "Enter the analysis date (YYYY-MM-DD)",
             default_date,
         )
@@ -533,13 +534,12 @@ def get_user_selections():
     # Step 3: Output language (skipped when set via TRADINGAGENTS_OUTPUT_LANGUAGE)
     if os.environ.get("TRADINGAGENTS_OUTPUT_LANGUAGE"):
         output_language = DEFAULT_CONFIG["output_language"]
-        console.print(
-            f"[green]✓ Output language from environment:[/green] {output_language}"
-        )
+        console.print(env_notice("Output language", output_language))
     else:
         console.print(
-            create_question_box(
-                "Step 3: Output Language",
+            step_panel(
+                3,
+                "Output Language",
                 "Select the language for analyst reports and final decision"
             )
         )
@@ -547,8 +547,10 @@ def get_user_selections():
 
     # Step 4: Select analysts
     console.print(
-        create_question_box(
-            "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
+        step_panel(
+            4,
+            "Analyst Desk",
+            "Select the LLM analyst agents for this research run"
         )
     )
     selected_analysts = select_analysts(asset_type)
@@ -558,8 +560,10 @@ def get_user_selections():
 
     # Step 5: Research depth
     console.print(
-        create_question_box(
-            "Step 5: Research Depth", "Select your research depth level"
+        step_panel(
+            5,
+            "Research Depth",
+            "Select the debate and risk-review depth"
         )
     )
     selected_research_depth = select_research_depth()
@@ -574,14 +578,16 @@ def get_user_selections():
         backend_url = resolve_backend_url(
             selected_llm_provider, env_url=DEFAULT_CONFIG["backend_url"]
         )
-        console.print(f"[green]✓ LLM provider from environment:[/green] {selected_llm_provider}")
-        console.print(f"[green]✓ Backend URL:[/green] {backend_url}")
+        console.print(env_notice("LLM provider", selected_llm_provider))
+        console.print(env_notice("Backend URL", backend_url))
         # Still confirm/persist the API key so the run doesn't fail later.
         ensure_api_key(selected_llm_provider)
     else:
         console.print(
-            create_question_box(
-                "Step 6: LLM Provider", "Select your LLM provider"
+            step_panel(
+                6,
+                "LLM Provider",
+                "Select the model provider for the analyst desk"
             )
         )
         selected_llm_provider, backend_url = select_llm_provider()
@@ -621,14 +627,14 @@ def get_user_selections():
     if os.environ.get("TRADINGAGENTS_QUICK_THINK_LLM") or os.environ.get("TRADINGAGENTS_DEEP_THINK_LLM"):
         selected_shallow_thinker = DEFAULT_CONFIG["quick_think_llm"]
         selected_deep_thinker = DEFAULT_CONFIG["deep_think_llm"]
-        console.print(
-            f"[green]✓ Thinking agents from environment:[/green] "
-            f"quick={selected_shallow_thinker}, deep={selected_deep_thinker}"
-        )
+        console.print(env_notice("Quick model", selected_shallow_thinker))
+        console.print(env_notice("Deep model", selected_deep_thinker))
     else:
         console.print(
-            create_question_box(
-                "Step 7: Thinking Agents", "Select your thinking agents for analysis"
+            step_panel(
+                7,
+                "Thinking Models",
+                "Select the quick and deep models for agent reasoning"
             )
         )
         selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
@@ -649,24 +655,27 @@ def get_user_selections():
         anthropic_effort = DEFAULT_CONFIG["anthropic_effort"]
     elif provider_lower == "google":
         console.print(
-            create_question_box(
-                "Step 8: Thinking Mode",
+            step_panel(
+                8,
+                "Thinking Mode",
                 "Configure Gemini thinking mode"
             )
         )
         thinking_level = ask_gemini_thinking_config()
     elif provider_lower == "openai":
         console.print(
-            create_question_box(
-                "Step 8: Reasoning Effort",
+            step_panel(
+                8,
+                "Reasoning Effort",
                 "Configure OpenAI reasoning effort level"
             )
         )
         reasoning_effort = ask_openai_reasoning_effort()
     elif provider_lower == "anthropic":
         console.print(
-            create_question_box(
-                "Step 8: Effort Level",
+            step_panel(
+                8,
+                "Effort Level",
                 "Configure Claude effort level"
             )
         )
@@ -801,7 +810,7 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
 def display_complete_report(final_state):
     """Display the complete analysis report sequentially (avoids truncation)."""
     console.print()
-    console.print(Rule("Complete Analysis Report", style="bold green"))
+    console.print(report_section_header("Complete Analysis Report", PALETTE["success"]))
 
     # I. Analyst Team Reports
     analysts = []
@@ -814,9 +823,9 @@ def display_complete_report(final_state):
     if final_state.get("fundamentals_report"):
         analysts.append(("Fundamentals Analyst", final_state["fundamentals_report"]))
     if analysts:
-        console.print(Panel("[bold]I. Analyst Team Reports[/bold]", border_style="cyan"))
+        console.print(report_section_header("I. Analyst Team Reports", PALETTE["primary"]))
         for title, content in analysts:
-            console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
+            console.print(make_panel(Markdown(content), title=title, border_style=PALETTE["panel"], padding=(1, 2)))
 
     # II. Research Team Reports
     if final_state.get("investment_debate_state"):
@@ -829,14 +838,14 @@ def display_complete_report(final_state):
         if debate.get("judge_decision"):
             research.append(("Research Manager", debate["judge_decision"]))
         if research:
-            console.print(Panel("[bold]II. Research Team Decision[/bold]", border_style="magenta"))
+            console.print(report_section_header("II. Research Team Decision", PALETTE["violet"]))
             for title, content in research:
-                console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
+                console.print(make_panel(Markdown(content), title=title, border_style=PALETTE["panel"], padding=(1, 2)))
 
     # III. Trading Team
     if final_state.get("trader_investment_plan"):
-        console.print(Panel("[bold]III. Trading Team Plan[/bold]", border_style="yellow"))
-        console.print(Panel(Markdown(final_state["trader_investment_plan"]), title="Trader", border_style="blue", padding=(1, 2)))
+        console.print(report_section_header("III. Trading Team Plan", PALETTE["accent"]))
+        console.print(make_panel(Markdown(final_state["trader_investment_plan"]), title="Trader", border_style=PALETTE["panel"], padding=(1, 2)))
 
     # IV. Risk Management Team
     if final_state.get("risk_debate_state"):
@@ -849,14 +858,14 @@ def display_complete_report(final_state):
         if risk.get("neutral_history"):
             risk_reports.append(("Neutral Analyst", risk["neutral_history"]))
         if risk_reports:
-            console.print(Panel("[bold]IV. Risk Management Team Decision[/bold]", border_style="red"))
+            console.print(report_section_header("IV. Risk Management Team Decision", PALETTE["danger"]))
             for title, content in risk_reports:
-                console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
+                console.print(make_panel(Markdown(content), title=title, border_style=PALETTE["panel"], padding=(1, 2)))
 
         # V. Portfolio Manager Decision
         if risk.get("judge_decision"):
-            console.print(Panel("[bold]V. Portfolio Manager Decision[/bold]", border_style="green"))
-            console.print(Panel(Markdown(risk["judge_decision"]), title="Portfolio Manager", border_style="blue", padding=(1, 2)))
+            console.print(report_section_header("V. Portfolio Manager Decision", PALETTE["success"]))
+            console.print(make_panel(Markdown(risk["judge_decision"]), title="Portfolio Manager", border_style=PALETTE["panel"], padding=(1, 2)))
 
 
 def update_research_team_status(status):
@@ -1042,6 +1051,11 @@ def run_analysis(checkpoint: bool = False):
 
     # Initialize message buffer with selected analysts
     message_buffer.init_for_analysis(selected_analyst_keys)
+    message_buffer.set_session_context(
+        ticker=selections["ticker"],
+        analysis_date=selections["analysis_date"],
+        llm_provider=selections["llm_provider"],
+    )
 
     # Track start time for elapsed display
     start_time = time.time()
@@ -1272,7 +1286,14 @@ def run_analysis(checkpoint: bool = False):
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
     # Post-analysis prompts (outside Live context for clean interaction)
-    console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
+    console.print()
+    console.print(
+        make_panel(
+            Align.center(Text("Analysis Complete", style=f"bold {PALETTE['success']}")),
+            border_style=PALETTE["success"],
+            padding=(1, 2),
+        )
+    )
     console.print(f"[dim]{analyst_wall_time_tracker.format_summary()}[/dim]")
 
     # Prompt to save report

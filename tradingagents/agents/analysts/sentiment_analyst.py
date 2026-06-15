@@ -5,13 +5,11 @@ the old version had a prompt that demanded social-media analysis but the
 only tool available was Yahoo Finance news — which led LLMs to fabricate
 Reddit/X/StockTwits content under prompt pressure (verified live).
 
-The redesigned agent pre-fetches three complementary data sources before
-the LLM is invoked and injects them into the prompt as structured blocks:
-
-  1. News headlines     — Yahoo Finance (institutional framing)
-  2. StockTwits messages — retail-trader posts indexed by cashtag, with
-                           user-labeled Bullish/Bearish sentiment tags
-  3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
+The redesigned agent pre-fetches complementary data sources before the LLM
+is invoked and injects them into the prompt as structured blocks. Mainland
+China A-shares use domestic sources (East Money Guba + optional Tushare Pro
+news). Other instruments keep the original Yahoo Finance + StockTwits +
+Reddit source mix.
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -39,6 +37,8 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows.cn_sentiment import fetch_cn_sentiment_sources
+from tradingagents.dataflows.eastmoney import is_a_share_symbol
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
@@ -50,10 +50,10 @@ def _seven_days_back(trade_date: str) -> str:
 def create_sentiment_analyst(llm):
     """Create a sentiment analyst node for the trading graph.
 
-    Pre-fetches news + StockTwits + Reddit data, injects them into the
-    prompt as structured blocks, and produces a deterministic sentiment
-    report via structured output (with a free-text fallback for providers
-    that do not support it).
+    Pre-fetches market-appropriate sentiment data, injects it into the prompt
+    as structured blocks, and produces a deterministic sentiment report via
+    structured output (with a free-text fallback for providers that do not
+    support it).
     """
     structured_llm = bind_structured(llm, SentimentReport, "Sentiment Analyst")
 
@@ -63,21 +63,30 @@ def create_sentiment_analyst(llm):
         start_date = _seven_days_back(end_date)
         instrument_context = get_instrument_context_from_state(state)
 
-        # Pre-fetch all three sources. Each fetcher degrades gracefully and
-        # returns a string (no exceptions surface from here), so the LLM
-        # always sees something — either real data or a clear placeholder.
-        news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+        # Pre-fetch source data before the model is invoked. Each fetcher
+        # degrades gracefully and returns a string, so the LLM sees real data
+        # or an explicit placeholder instead of being pressured to invent.
+        if is_a_share_symbol(ticker):
+            domestic_block = fetch_cn_sentiment_sources(ticker, start_date, end_date)
+            system_message = _build_china_system_message(
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+                domestic_block=domestic_block,
+            )
+        else:
+            news_block = get_news.func(ticker, start_date, end_date)
+            stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
+            reddit_block = fetch_reddit_posts(ticker)
 
-        system_message = _build_system_message(
-            ticker=ticker,
-            start_date=start_date,
-            end_date=end_date,
-            news_block=news_block,
-            stocktwits_block=stocktwits_block,
-            reddit_block=reddit_block,
-        )
+            system_message = _build_global_system_message(
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+                news_block=news_block,
+                stocktwits_block=stocktwits_block,
+                reddit_block=reddit_block,
+            )
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -118,7 +127,52 @@ def create_sentiment_analyst(llm):
     return sentiment_analyst_node
 
 
-def _build_system_message(
+def _build_china_system_message(
+    *,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    domestic_block: str,
+) -> str:
+    """Assemble the A-share sentiment prompt with domestic pre-fetched data."""
+    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing only on the domestic China data sources that have already been collected for you.
+
+## Data sources (pre-fetched, in this prompt)
+
+### China A-share sentiment packet — East Money Guba plus optional Tushare Pro news
+East Money Guba is the primary domestic retail-investor discussion source. Read engagement through post count, reads, comments, recurring titles, and detailed excerpts. Tushare Pro news, when available, is a supplementary domestic news feed rather than a forum.
+
+<start_of_china_sentiment>
+{domestic_block}
+<end_of_china_sentiment>
+
+## How to analyze this data (best practices)
+
+1. **Prioritize domestic forum evidence for A-shares.** Do not analyze Yahoo Finance, StockTwits, Reddit, or other overseas forums unless they are explicitly present in the source packet. For this A-share run, the relevant retail sentiment source is East Money Guba.
+
+2. **Separate retail chatter from factual news.** East Money Guba user posts are opinion and momentum signals; posts from official information accounts or Tushare news are event/news inputs. Weight them differently.
+
+3. **Use engagement as signal quality.** High comment/read posts deserve more attention than low-engagement noise. A one-line bullish title with little engagement should not dominate the report.
+
+4. **Identify recurring domestic narratives.** Look for repeated themes such as order growth, sector rotation, financing flows, short-term price targets, valuation disputes, shareholder selling, policy expectations, and earnings catalysts.
+
+5. **Be explicit about data limits.** If a source is blocked, permission-limited, or sparse, say so. If Tushare returns a permission note, do not treat that as bearish; it is only a data-availability issue.
+
+6. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
+
+## Output fields
+
+Fill the following fields:
+
+- **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
+- **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
+- **confidence**: low / medium / high, based on data quality and sample size.
+- **narrative**: Full source-by-source breakdown, divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
+
+{get_language_instruction()}"""
+
+
+def _build_global_system_message(
     *,
     ticker: str,
     start_date: str,

@@ -12,13 +12,24 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
 from .config import get_config
+from .chinabond_web import get_macro_data as get_chinabond_macro_data
+from .eastmoney_fundamentals import (
+    get_balance_sheet as get_eastmoney_balance_sheet,
+    get_cashflow as get_eastmoney_cashflow,
+    get_fundamentals as get_eastmoney_fundamentals,
+    get_income_statement as get_eastmoney_income_statement,
+)
+from .eastmoney_news import get_news as get_eastmoney_news
+from .eastmoney import get_stock as get_eastmoney_stock
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .macro_fallback import get_macro_note
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
+from .tushare_macro import get_macro_data as get_tushare_macro_data
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
     get_cashflow as get_yfinance_cashflow,
@@ -82,39 +93,50 @@ VENDOR_LIST = [
     "fred",
     "polymarket",
     "alpha_vantage",
+    "eastmoney",
+    "chinabond_web",
+    "tushare",
+    "local_note",
 ]
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
     # core_stock_apis
     "get_stock_data": {
+        "eastmoney": get_eastmoney_stock,
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
     },
     # technical_indicators
     "get_indicators": {
+        "eastmoney": get_stock_stats_indicators_window,
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
     },
     # fundamental_data
     "get_fundamentals": {
+        "eastmoney": get_eastmoney_fundamentals,
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
     },
     "get_balance_sheet": {
+        "eastmoney": get_eastmoney_balance_sheet,
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
     },
     "get_cashflow": {
+        "eastmoney": get_eastmoney_cashflow,
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
     },
     "get_income_statement": {
+        "eastmoney": get_eastmoney_income_statement,
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
     },
     # news_data
     "get_news": {
+        "eastmoney": get_eastmoney_news,
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
     },
@@ -128,7 +150,10 @@ VENDOR_METHODS = {
     },
     # macro_data
     "get_macro_indicators": {
+        "chinabond_web": get_chinabond_macro_data,
+        "tushare": get_tushare_macro_data,
         "fred": get_fred_macro_data,
+        "local_note": get_macro_note,
     },
     # prediction_markets
     "get_prediction_markets": {
@@ -193,8 +218,10 @@ def route_to_vendor(method: str, *args, **kwargs):
 
         try:
             return impl_func(*args, **kwargs)
-        except VendorRateLimitError:
-            logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
+        except VendorRateLimitError as e:
+            logger.warning("Vendor %r rate-limited for %s: %s; trying next vendor.", vendor, method, e)
+            if first_error is None:
+                first_error = e
             continue
         except VendorNotConfiguredError as e:
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)

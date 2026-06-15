@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from io import StringIO
 from typing import Annotated
 
 import pandas as pd
@@ -66,6 +67,67 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
     data[price_cols] = data[price_cols].ffill().bfill()
 
     return data
+
+
+def _configured_core_stock_vendors(config: dict) -> list[str]:
+    vendor_config = config.get("data_vendors", {}).get("core_stock_apis", "yfinance")
+    vendors = [vendor.strip() for vendor in str(vendor_config).split(",") if vendor.strip()]
+    return vendors or ["yfinance"]
+
+
+def _load_alpha_vantage_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    from .alpha_vantage_stock import get_stock
+
+    csv_data = get_stock(symbol, start_date, end_date)
+    data = pd.read_csv(StringIO(csv_data))
+    rename_map = {
+        "timestamp": "Date",
+        "open": "Open",
+        "high": "High",
+        "low": "Low",
+        "close": "Close",
+        "volume": "Volume",
+    }
+    return data.rename(columns={key: value for key, value in rename_map.items() if key in data.columns})
+
+
+def _load_eastmoney_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    from .eastmoney import load_ohlcv
+
+    return load_ohlcv(symbol, start_date, end_date)
+
+
+def _load_yfinance_ohlcv(
+    symbol: str,
+    canonical: str,
+    safe_symbol: str,
+    start_str: str,
+    end_str: str,
+    cache_dir: str,
+) -> pd.DataFrame:
+    data_file = os.path.join(
+        cache_dir,
+        f"{safe_symbol}-YFin-data-{start_str}-{end_str}.csv",
+    )
+
+    if os.path.exists(data_file):
+        cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
+        if not cached.empty and "Close" in cached.columns:
+            return cached
+
+    downloaded = yf_retry(lambda: yf.download(
+        canonical,
+        start=start_str,
+        end=end_str,
+        multi_level_index=False,
+        progress=False,
+        auto_adjust=True,
+    ))
+    downloaded = _ensure_date_column(downloaded.reset_index())
+    if downloaded.empty or "Close" not in downloaded.columns:
+        raise NoMarketDataError(symbol, canonical, "Yahoo Finance returned no rows")
+    downloaded.to_csv(data_file, index=False, encoding="utf-8")
+    return downloaded
 
 
 def _coerce_ohlcv_dates(data: pd.DataFrame) -> pd.Series:
@@ -148,37 +210,57 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     end_str = (today_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
     os.makedirs(config["data_cache_dir"], exist_ok=True)
-    data_file = os.path.join(
-        config["data_cache_dir"],
-        f"{safe_symbol}-YFin-data-{start_str}-{end_str}.csv",
-    )
-
-    # A cached file may be empty if a prior fetch failed (unknown symbol,
-    # transient rate limit). Treat an empty/columnless cache as a miss and
-    # re-fetch rather than serving the poisoned file forever.
     data = None
-    if os.path.exists(data_file):
-        cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
-        if not cached.empty and "Close" in cached.columns:
-            data = cached
+    first_error: Exception | None = None
+    for vendor in _configured_core_stock_vendors(config):
+        try:
+            if vendor == "eastmoney":
+                eastmoney_file = os.path.join(
+                    config["data_cache_dir"],
+                    f"{safe_symbol}-EastMoney-data-{start_str}-{end_str}.csv",
+                )
+                if os.path.exists(eastmoney_file):
+                    cached = pd.read_csv(eastmoney_file, on_bad_lines="skip", encoding="utf-8")
+                    if not cached.empty and "Close" in cached.columns:
+                        data = cached
+                    else:
+                        data = None
+                if data is None:
+                    data = _load_eastmoney_ohlcv(canonical, start_str, end_str)
+                    if data.empty or "Close" not in data.columns:
+                        raise NoMarketDataError(symbol, canonical, "East Money returned no rows")
+                    data.to_csv(eastmoney_file, index=False, encoding="utf-8")
+                break
+            if vendor == "alpha_vantage":
+                alpha_file = os.path.join(
+                    config["data_cache_dir"],
+                    f"{safe_symbol}-AlphaVantage-data-{start_str}-{end_str}.csv",
+                )
+                if os.path.exists(alpha_file):
+                    cached = pd.read_csv(alpha_file, on_bad_lines="skip", encoding="utf-8")
+                    if not cached.empty and "Close" in cached.columns:
+                        data = cached
+                    else:
+                        data = None
+                if data is None:
+                    data = _load_alpha_vantage_ohlcv(canonical, start_str, end_str)
+                    if data.empty or "Close" not in data.columns:
+                        raise NoMarketDataError(symbol, canonical, "Alpha Vantage returned no rows")
+                    data.to_csv(alpha_file, index=False, encoding="utf-8")
+                break
+            if vendor == "yfinance":
+                data = _load_yfinance_ohlcv(symbol, canonical, safe_symbol, start_str, end_str, config["data_cache_dir"])
+                break
+        except Exception as exc:  # noqa: BLE001 - try the next configured vendor
+            logger.warning("OHLCV vendor %r failed for %s: %s", vendor, symbol, exc)
+            if first_error is None:
+                first_error = exc
+            data = None
 
     if data is None:
-        downloaded = yf_retry(lambda: yf.download(
-            canonical,
-            start=start_str,
-            end=end_str,
-            multi_level_index=False,
-            progress=False,
-            auto_adjust=True,
-        ))
-        downloaded = _ensure_date_column(downloaded.reset_index())
-        # Only cache real data — never persist an empty frame.
-        if downloaded.empty or "Close" not in downloaded.columns:
-            raise NoMarketDataError(
-                symbol, canonical, "Yahoo Finance returned no rows"
-            )
-        downloaded.to_csv(data_file, index=False, encoding="utf-8")
-        data = downloaded
+        if first_error is not None:
+            raise first_error
+        raise RuntimeError(f"No configured OHLCV vendor available for {symbol}")
 
     data = _clean_dataframe(data)
 
