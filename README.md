@@ -1,310 +1,167 @@
-<p align="center">
-  <img src="assets/TauricResearch.png" style="width: 60%; height: auto;">
-</p>
+# TradingAgents A 股研究控制台
 
-<div align="center" style="line-height: 1;">
-  <a href="https://arxiv.org/abs/2412.20138" target="_blank"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2412.20138-B31B1B?logo=arxiv"/></a>
-  <a href="https://discord.com/invite/hk9PGKShPK" target="_blank"><img alt="Discord" src="https://img.shields.io/badge/Discord-TradingResearch-7289da?logo=discord&logoColor=white&color=7289da"/></a>
-  <a href="./assets/wechat.png" target="_blank"><img alt="WeChat" src="https://img.shields.io/badge/WeChat-TauricResearch-brightgreen?logo=wechat&logoColor=white"/></a>
-  <a href="https://x.com/TauricResearch" target="_blank"><img alt="X Follow" src="https://img.shields.io/badge/X-TauricResearch-white?logo=x&logoColor=white"/></a>
-  <br>
-  <a href="https://github.com/TauricResearch/" target="_blank"><img alt="Community" src="https://img.shields.io/badge/Join_GitHub_Community-TauricResearch-14C290?logo=discourse"/></a>
-</div>
+本仓库基于 [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) 改造，加入了本地网页控制台、A 股数据源适配和中国宏观利率数据兜底。目标是让多智能体金融研究流程不只停留在命令行里，而是可以在浏览器中实时看到每个分析员、研究员、交易员和风控角色的推理过程。
 
-<div align="center">
-  <!-- Keep these links. Translations will automatically update with the README. -->
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=de">Deutsch</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=es">Español</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=fr">français</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ja">日本語</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ko">한국어</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=pt">Português</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ru">Русский</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=zh">中文</a>
-</div>
-
----
-
-# TradingAgents: Multi-Agents LLM Financial Trading Framework
-
-## News
-- [2026-05] **TradingAgents v0.2.5** released with the grounded Sentiment Analyst, GPT-5.5 etc. model coverage, Qwen/GLM/MiniMax dual-region support, `TRADINGAGENTS_*` env-var configurability with API-key auto-detection, remote Ollama support, non-US alpha benchmarks, and ticker path-traversal hardening. See [CHANGELOG.md](CHANGELOG.md) for the full list.
-- [2026-04] **TradingAgents v0.2.4** released with structured-output agents (Research Manager, Trader, Portfolio Manager), LangGraph checkpoint resume, persistent decision log, DeepSeek/Qwen/GLM/Azure provider support, Docker, and a Windows UTF-8 encoding fix.
-- [2026-03] **TradingAgents v0.2.3** released with multi-language support, GPT-5.4 family models, unified model catalog, backtesting date fidelity, and proxy support.
-- [2026-03] **TradingAgents v0.2.2** released with GPT-5.4/Gemini 3.1/Claude 4.6 model coverage, five-tier rating scale, OpenAI Responses API, Anthropic effort control, and cross-platform stability.
-- [2026-02] **TradingAgents v0.2.0** released with multi-provider LLM support (GPT-5.x, Gemini 3.x, Claude 4.x, Grok 4.x) and improved system architecture.
-- [2026-01] **Trading-R1** [Technical Report](https://arxiv.org/abs/2509.11420) released, with [Terminal](https://github.com/TauricResearch/Trading-R1) expected to land soon.
-
-<div align="center">
-<a href="https://www.star-history.com/#TauricResearch/TradingAgents&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" />
-   <img alt="TradingAgents Star History" src="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" style="width: 80%; height: auto;" />
- </picture>
-</a>
-</div>
-
-> 🎉 **TradingAgents** officially released! We have received numerous inquiries about the work, and we would like to express our thanks for the enthusiasm in our community.
->
-> So we decided to fully open-source the framework. Looking forward to building impactful projects with you!
-
-<div align="center">
-
-🚀 [TradingAgents](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🎬 [Demo](https://www.youtube.com/watch?v=90gr5lwjIho) | 📦 [Package Usage](#tradingagents-package) | 🤝 [Contributing](#contributing) | 📄 [Citation](#citation)
-
-</div>
-
-## TradingAgents Framework
-
-TradingAgents is a multi-agent trading framework that mirrors the dynamics of real-world trading firms. By deploying specialized LLM-powered agents: from fundamental analysts, sentiment experts, and technical analysts, to trader, risk management team, the platform collaboratively evaluates market conditions and informs trading decisions. Moreover, these agents engage in dynamic discussions to pinpoint the optimal strategy.
+> 本项目用于研究和学习，不构成任何投资建议。模型输出会受到数据质量、API 稳定性、提示词和大模型随机性的影响。
 
 <p align="center">
-  <img src="assets/schema.png" style="width: 100%; height: auto;">
+  <img src="assets/readme/web-console-overview.png" alt="TradingAgents A 股研究控制台总览" width="100%">
 </p>
 
-> TradingAgents framework is designed for research purposes. Trading performance may vary based on many factors, including the chosen backbone language models, model temperature, trading periods, the quality of data, and other non-deterministic factors. [It is not intended as financial, investment, or trading advice.](https://tauric.ai/disclaimer/)
+## 这个版本做了什么
 
-Our framework decomposes complex trading tasks into specialized roles.
+- 新增本地 Web 控制台，支持在浏览器里查看工作流进度、Token 消耗、工具调用、实时消息流和最终交易建议。
+- 针对 A 股做了数据源改造，优先使用东方财富公开数据，减少对海外站点的依赖。
+- 接入东方财富股吧、个股新闻和 F10 信息，用于新闻、情绪面和基本面分析。
+- 接入中债网页源作为中国收益率曲线优先来源，获取不到时会给出温和的数据缺口说明，而不是直接让整轮分析报错。
+- 保留 Alpha Vantage、yfinance、FRED、Tushare 等可选数据源作为补充或兜底。
+- 支持 DeepSeek 等 LLM Provider，并在网页侧展示 API key 是否已检测到，但不会展示具体密钥。
 
-### Analyst Team
-- Fundamentals Analyst: Evaluates company financials and performance metrics, identifying intrinsic values and potential red flags.
-- Sentiment Analyst: Aggregates news headlines, StockTwits, and Reddit chatter into a single sentiment read to gauge short-term market mood.
-- News Analyst: Monitors global news and macroeconomic indicators, interpreting the impact of events on market conditions.
-- Technical Analyst: Utilizes technical indicators (like MACD and RSI) to detect trading patterns and forecast price movements.
+## 实际界面
+
+### 研究备忘录
+
+多智能体会把市场、新闻、情绪、基本面、辩论、交易员和最终结论分阶段写入 Live memo，方便回看分析链路。
 
 <p align="center">
-  <img src="assets/analyst.png" width="100%" style="display: inline-block; margin: 0 2%;">
+  <img src="assets/readme/live-memo-news.png" alt="新闻和情绪分析备忘录" width="100%">
 </p>
 
-### Researcher Team
-- Comprises both bullish and bearish researchers who critically assess the insights provided by the Analyst Team. Through structured debates, they balance potential gains against inherent risks.
+### 多空辩论与交易计划
+
+研究团队会对同一标的形成多空视角，交易员再把争论压缩成可执行计划，包括核心动作、卖出节奏、止损和后续观察变量。
 
 <p align="center">
-  <img src="assets/researcher.png" width="70%" style="display: inline-block; margin: 0 2%;">
+  <img src="assets/readme/debate-plan.png" alt="多空辩论和交易计划" width="100%">
 </p>
 
-### Trader Agent
-- Composes reports from the analysts and researchers to make informed trading decisions, determining the timing and magnitude of trades.
+### 风控视角
+
+风险角色会从激进、中性、保守视角审视交易方案，输出更接近真实投研会议的反方观点和风险提示。
 
 <p align="center">
-  <img src="assets/trader.png" width="70%" style="display: inline-block; margin: 0 2%;">
+  <img src="assets/readme/aggressive-analysis.png" alt="风险分析视角" width="100%">
 </p>
 
-### Risk Management and Portfolio Manager
-- Continuously evaluates portfolio risk by assessing market volatility, liquidity, and other risk factors. The risk management team evaluates and adjusts trading strategies, providing assessment reports to the Portfolio Manager for final decision.
-- The Portfolio Manager approves/rejects the transaction proposal. If approved, the order will be sent to the simulated exchange and executed.
+## 数据源
 
-<p align="center">
-  <img src="assets/risk.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
+| 模块 | 默认来源 | 说明 |
+| --- | --- | --- |
+| A 股行情 | 东方财富 | 优先用于日线行情、技术指标和市场快照 |
+| A 股新闻 | 东方财富个股新闻、股吧 | 用于新闻面和情绪面分析 |
+| A 股基本面 | 东方财富 F10 | 用于公司概况和关键财务指标 |
+| 中国宏观利率 | 中债网页源 | 优先获取人民币国债收益率曲线 |
+| 海外宏观 | FRED | 配置 `FRED_API_KEY` 后启用 |
+| 补充行情 | Alpha Vantage、yfinance | A 股不稳定时作为兜底，不保证覆盖全部中国股票 |
+| 可选付费源 | Tushare Pro | 默认不启用新闻接口，除非你明确配置并拥有对应权限 |
 
-## Installation and CLI
+如果公开网页源临时不可用，系统会尽量把问题记录为“数据缺口”，避免因为单个数据源失败导致整轮多智能体工作流中断。
 
-### Installation
+## 快速开始
 
-Clone TradingAgents:
-```bash
-git clone https://github.com/TauricResearch/TradingAgents.git
+### 1. 克隆仓库
+
+```powershell
+git clone https://github.com/1earner0327/TradingAgents.git
 cd TradingAgents
+git checkout codex/a-share-web-console
 ```
 
-Create a virtual environment in any of your favorite environment managers:
-```bash
-conda create -n tradingagents python=3.12
-conda activate tradingagents
+### 2. 准备 Python 环境
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .
 ```
 
-Install the package and its dependencies:
-```bash
-pip install .
+### 3. 安装网页依赖
+
+```powershell
+cd web
+npm install
+cd ..
 ```
 
-### Docker
+### 4. 配置 API key
 
-Alternatively, run with Docker:
-```bash
-cp .env.example .env  # add your API keys
-docker compose run --rm tradingagents
+复制示例文件：
+
+```powershell
+Copy-Item .env.example .env
 ```
 
-For local models with Ollama:
-```bash
-docker compose --profile ollama run --rm tradingagents-ollama
+最少需要填写一个大模型 key。当前推荐使用 DeepSeek：
+
+```env
+DEEPSEEK_API_KEY=
+TRADINGAGENTS_LLM_PROVIDER=deepseek
+TRADINGAGENTS_DEEP_THINK_LLM=deepseek-v4-pro
+TRADINGAGENTS_QUICK_THINK_LLM=deepseek-v4-pro
+TRADINGAGENTS_DATA_VENDOR_CHAIN=eastmoney,alpha_vantage,yfinance
+TRADINGAGENTS_MACRO_VENDOR_CHAIN=chinabond_web,tushare,fred,local_note
+TRADINGAGENTS_ENABLE_TUSHARE_NEWS=0
 ```
 
-### Required APIs
+可选 key：
 
-TradingAgents supports multiple LLM providers. Set the API key for your chosen provider:
+| Key | 用途 | 获取地址 |
+| --- | --- | --- |
+| `DEEPSEEK_API_KEY` | 大模型推理 | <https://platform.deepseek.com/> |
+| `ALPHA_VANTAGE_API_KEY` | 可选行情兜底 | <https://www.alphavantage.co/support/#api-key> |
+| `FRED_API_KEY` | 美国宏观数据 | <https://fred.stlouisfed.org/docs/api/api_key.html> |
+| `TUSHARE_TOKEN` | 可选付费数据源 | <https://tushare.pro/> |
 
-```bash
-export OPENAI_API_KEY=...          # OpenAI (GPT)
-export GOOGLE_API_KEY=...          # Google (Gemini)
-export ANTHROPIC_API_KEY=...       # Anthropic (Claude)
-export XAI_API_KEY=...             # xAI (Grok)
-export DEEPSEEK_API_KEY=...        # DeepSeek
-export DASHSCOPE_API_KEY=...       # Qwen — International (dashscope-intl.aliyuncs.com)
-export DASHSCOPE_CN_API_KEY=...    # Qwen — China (dashscope.aliyuncs.com)
-export ZHIPU_API_KEY=...           # GLM via Z.AI (international)
-export ZHIPU_CN_API_KEY=...        # GLM via BigModel (China, open.bigmodel.cn)
-export MINIMAX_API_KEY=...         # MiniMax — Global (api.minimax.io, M2.x, 204K ctx)
-export MINIMAX_CN_API_KEY=...      # MiniMax — China (api.minimaxi.com, M2.x, 204K ctx)
-export OPENROUTER_API_KEY=...      # OpenRouter
-export ALPHA_VANTAGE_API_KEY=...   # Alpha Vantage
+`.env` 已经被 `.gitignore` 忽略，不要把真实 API key 提交到 GitHub。
+
+### 5. 启动网页控制台
+
+```powershell
+.\start_tradingagents_web.cmd
 ```
 
-For Azure OpenAI, copy `.env.enterprise.example` to `.env.enterprise` and fill in your credentials.
+启动后浏览器访问：
 
-For AWS Bedrock, install the extra with `pip install ".[bedrock]"`, set `llm_provider: "bedrock"`, configure AWS credentials (environment variables, `~/.aws/credentials`, or an IAM role) and `AWS_DEFAULT_REGION`, and use a Bedrock model ID, e.g. `us.anthropic.claude-opus-4-8-v1:0`.
-
-For local models, configure Ollama with `llm_provider: "ollama"`. The default endpoint is `http://localhost:11434/v1`; set `OLLAMA_BASE_URL` to point at a remote `ollama-serve`. Pull models with `ollama pull <name>`, and pick "Custom model ID" in the CLI for any model not listed by default.
-
-For any other OpenAI-compatible server (vLLM, LM Studio, llama.cpp, or a custom relay), use `llm_provider: "openai_compatible"` and set the endpoint via `backend_url` (or `TRADINGAGENTS_LLM_BACKEND_URL`), e.g. `http://localhost:8000/v1` for vLLM or `http://localhost:1234/v1` for LM Studio. The model is whatever your server serves. No key is needed for local servers; set `OPENAI_COMPATIBLE_API_KEY` when the endpoint requires one.
-
-Alternatively, copy `.env.example` to `.env` and fill in your keys:
-```bash
-cp .env.example .env
+```text
+http://127.0.0.1:5173
 ```
 
-### CLI Usage
+## 使用方式
 
-Launch the interactive CLI:
-```bash
-tradingagents          # installed command
-python -m cli.main     # alternative: run directly from source
-```
-You will see a screen where you can select your desired tickers, analysis date, LLM provider, research depth, and more.
+1. 在左侧输入股票代码，例如 `688017`、`300308`。
+2. 选择分析日期和研究深度。
+3. 勾选 Market、News、Sentiment、Fundamentals 等分析桌。
+4. 点击 `Run analysis`。
+5. 在右侧 Signal feed 观察工具调用和智能体消息。
+6. 在 Live memo 中切换不同阶段，查看完整分析过程。
+7. 在 Final verdict 中查看最终交易建议。
 
-### Markets and tickers
+## 稳定性说明
 
-TradingAgents works with any market Yahoo Finance covers, using the exchange-suffixed ticker. Company identity and the alpha benchmark resolve automatically per market.
+- 中国大陆网络环境下，东方财富和中债网页源通常比 Yahoo Finance、Reddit、StockTwits、FRED 等海外源更稳定。
+- 免费公开接口可能变更字段、限频或临时不可用，因此项目保留了多数据源 fallback。
+- Tushare 的部分新闻和高阶接口需要付费权限，本版本默认关闭 Tushare 新闻，避免无权限时报错。
+- 如果宏观数据拿不到，系统会把它写成数据缺口说明，不会再因为单个宏观工具失败而终止整轮分析。
 
-- US: `AAPL`, `SPY`
-- Hong Kong: `0700.HK` · Tokyo: `7203.T` · London: `AZN.L`
-- India: `RELIANCE.NS`, `.BO` · Canada: `.TO` · Australia: `.AX`
-- China A-shares: Shanghai `.SS`, Shenzhen `.SZ` (e.g. `600519.SS` for Kweichow Moutai)
-- Crypto: `BTC-USD`, `ETH-USD`
+## 项目结构
 
-<p align="center">
-  <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-An interface will appear showing results as they load, letting you track the agent's progress as it runs.
-
-<p align="center">
-  <img src="assets/cli/cli_news.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-<p align="center">
-  <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-## TradingAgents Package
-
-### Implementation Details
-
-We built TradingAgents with LangGraph to ensure flexibility and modularity. The framework supports multiple LLM providers: OpenAI, Google, Anthropic, xAI, DeepSeek, Qwen (Alibaba DashScope, international and China endpoints), GLM (Zhipu), MiniMax (global + China), OpenRouter, Ollama for local models, and Azure OpenAI for enterprise.
-
-### Python Usage
-
-To use TradingAgents inside your code, you can import the `tradingagents` module and initialize a `TradingAgentsGraph()` object. The `.propagate()` function will return a decision. You can run `main.py`, here's also a quick example:
-
-```python
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.default_config import DEFAULT_CONFIG
-
-ta = TradingAgentsGraph(debug=True, config=DEFAULT_CONFIG.copy())
-
-# forward propagate
-_, decision = ta.propagate("NVDA", "2026-01-15")
-print(decision)
+```text
+web/                         本地网页控制台和后端服务
+tradingagents/dataflows/     行情、新闻、情绪、宏观和基本面数据适配
+cli/                         原命令行交互入口
+start_tradingagents_web.cmd  Windows 一键启动脚本
+README_A_SHARE_WEB.md        A 股网页版本的简要配置说明
 ```
 
-You can also adjust the default configuration to set your own choice of LLMs, debate rounds, etc.
+## 和上游项目的关系
 
-```python
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.default_config import DEFAULT_CONFIG
+TradingAgents 原项目是一个多智能体金融交易研究框架，通过 Analyst、Researcher、Trader、Risk、Portfolio Manager 等角色模拟投研团队的协作。本 fork 保留原有框架，同时加入更适合 A 股研究和本地演示的网页体验。
 
-config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "openai"        # e.g. openai, google, anthropic, deepseek, groq, ollama; openai_compatible covers any OpenAI-compatible endpoint (vLLM, LM Studio, llama.cpp, ...)
-config["deep_think_llm"] = "gpt-5.5"     # Model for complex reasoning
-config["quick_think_llm"] = "gpt-5.4-mini" # Model for quick tasks
-config["max_debate_rounds"] = 2
+上游项目：
 
-ta = TradingAgentsGraph(debug=True, config=config)
-_, decision = ta.propagate("NVDA", "2026-01-15")
-print(decision)
-```
+- GitHub: <https://github.com/TauricResearch/TradingAgents>
+- Technical Report: <https://arxiv.org/abs/2412.20138>
 
-See `tradingagents/default_config.py` for all configuration options.
+## 免责声明
 
-## Persistence and Recovery
-
-TradingAgents persists two kinds of state across runs.
-
-### Decision log
-
-The decision log is always on. Each completed run appends its decision to `~/.tradingagents/memory/trading_memory.md`. On the next run for the same ticker, TradingAgents fetches the realised return (raw and alpha vs SPY), generates a one-paragraph reflection, and injects the most recent same-ticker decisions plus recent cross-ticker lessons into the Portfolio Manager prompt, so each analysis carries forward what worked and what didn't.
-
-Override the path with `TRADINGAGENTS_MEMORY_LOG_PATH`.
-
-### Checkpoint resume
-
-Checkpoint resume is opt-in via `--checkpoint`. When enabled, LangGraph saves state after each node so a crashed or interrupted run resumes from the last successful step instead of starting over. On a resume run you will see `Resuming from step N for <TICKER> on <date>` in the logs; on a new run you will see `Starting fresh`. Checkpoints are cleared automatically on successful completion.
-
-Per-ticker SQLite databases live at `~/.tradingagents/cache/checkpoints/<TICKER>.db` (override the base with `TRADINGAGENTS_CACHE_DIR`). Use `--clear-checkpoints` to reset all of them before a run.
-
-```bash
-tradingagents analyze --checkpoint           # enable for this run
-tradingagents analyze --clear-checkpoints    # reset before running
-```
-
-```python
-config = DEFAULT_CONFIG.copy()
-config["checkpoint_enabled"] = True
-ta = TradingAgentsGraph(config=config)
-_, decision = ta.propagate("NVDA", "2026-01-15")
-```
-
-## Reproducibility
-
-TradingAgents is LLM-driven, so two runs of the same ticker and date can differ. This is expected for a research tool built on language models, not a defect. The variation comes from a few distinct sources, and it helps to separate them.
-
-Language model sampling is non-deterministic. Even at a fixed temperature, providers do not guarantee byte-identical output across calls, and reasoning models (the default GPT-5.x family, and any thinking-mode model) vary the most because their internal reasoning is itself sampled.
-
-Live data moves. News, StockTwits, and Reddit return different content as time passes, so a run today sees different inputs than a run last week even for the same historical trade date. Pin the analysis date to hold the price and indicator window fixed, but the social and news sources still reflect "now".
-
-To reduce variation you can lower the sampling temperature. Set `temperature` in your config (or `TRADINGAGENTS_TEMPERATURE` in `.env`); lower values make models that honor it more repeatable. Reasoning models largely ignore temperature, so for tighter reproducibility pair a low temperature with a non-reasoning model such as `gpt-4.1`.
-
-```python
-config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "openai"
-config["deep_think_llm"] = "gpt-4.1"      # non-reasoning model honors temperature
-config["quick_think_llm"] = "gpt-4.1"
-config["temperature"] = 0.0
-```
-
-What does not vary anymore: the analyzed company identity is resolved deterministically from the ticker before any agent runs, and the market analyst grounds exact price and indicator claims in a verified data snapshot. Earlier reports of "different companies" or fabricated price levels across runs are addressed by these two mechanisms.
-
-Backtest results are not guaranteed to match any published figure. Returns depend on the model, the temperature, the date range, data quality, and the sampling above. Treat the framework as a research scaffold for studying multi-agent analysis, not as a strategy with a fixed, replicable return.
-
-## Contributing
-
-Contributions are welcome: bug fixes, documentation, and feature ideas; past contributions are credited per release in [`CHANGELOG.md`](CHANGELOG.md).
-
-## Citation
-
-Please reference our work if you find *TradingAgents* provides you with some help :)
-
-```
-@misc{xiao2025tradingagentsmultiagentsllmfinancial,
-      title={TradingAgents: Multi-Agents LLM Financial Trading Framework}, 
-      author={Yijia Xiao and Edward Sun and Di Luo and Wei Wang},
-      year={2025},
-      eprint={2412.20138},
-      archivePrefix={arXiv},
-      primaryClass={q-fin.TR},
-      url={https://arxiv.org/abs/2412.20138}, 
-}
-```
+本项目输出仅用于研究、学习和系统演示，不构成投资建议、交易建议或收益承诺。任何真实投资决策都应结合正式数据源、公司公告、交易所披露和个人风险承受能力独立判断。
