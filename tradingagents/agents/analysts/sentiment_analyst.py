@@ -7,9 +7,9 @@ Reddit/X/StockTwits content under prompt pressure (verified live).
 
 The redesigned agent pre-fetches complementary data sources before the LLM
 is invoked and injects them into the prompt as structured blocks. Mainland
-China A-shares use domestic sources (East Money Guba + optional Tushare Pro
-news). Other instruments keep the original Yahoo Finance + StockTwits +
-Reddit source mix.
+China A-shares use domestic sources (East Money Guba desktop/mobile, 10jqka
+mobile snapshot, and optional Tushare Pro news). Other instruments keep the
+original Yahoo Finance + StockTwits + Reddit source mix.
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -139,8 +139,8 @@ def _build_china_system_message(
 
 ## Data sources (pre-fetched, in this prompt)
 
-### China A-share sentiment packet — East Money Guba plus optional Tushare Pro news
-East Money Guba is the primary domestic retail-investor discussion source. Read engagement through post count, reads, comments, recurring titles, and detailed excerpts. Tushare Pro news, when available, is a supplementary domestic news feed rather than a forum.
+### China A-share sentiment packet — East Money Guba, East Money mobile Guba, 10jqka, plus optional Tushare Pro news
+East Money Guba is the primary domestic retail-investor discussion source. East Money mobile Guba is a second public entry point that can expose additional live rows when the desktop page is sparse. 10jqka mobile is an auxiliary public page snapshot; use it as supportive context only when it exposes stable static text. Tushare Pro news, when available, is a supplementary domestic news feed rather than a forum.
 
 <start_of_china_sentiment>
 {domestic_block}
@@ -148,7 +148,7 @@ East Money Guba is the primary domestic retail-investor discussion source. Read 
 
 ## How to analyze this data (best practices)
 
-1. **Prioritize domestic forum evidence for A-shares.** Do not analyze Yahoo Finance, StockTwits, Reddit, or other overseas forums unless they are explicitly present in the source packet. For this A-share run, the relevant retail sentiment source is East Money Guba.
+1. **Prioritize domestic evidence for A-shares.** Do not analyze Yahoo Finance, StockTwits, Reddit, or other overseas forums unless they are explicitly present in the source packet. For this A-share run, the relevant retail sentiment sources are East Money Guba desktop/mobile, plus any stable 10jqka public-page signals.
 
 2. **Separate retail chatter from factual news.** East Money Guba user posts are opinion and momentum signals; posts from official information accounts or Tushare news are event/news inputs. Weight them differently.
 

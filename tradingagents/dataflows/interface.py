@@ -19,6 +19,7 @@ from .eastmoney_fundamentals import (
     get_fundamentals as get_eastmoney_fundamentals,
     get_income_statement as get_eastmoney_income_statement,
 )
+from .eastmoney_moneyflow import get_capital_flow as get_eastmoney_capital_flow
 from .eastmoney_news import get_news as get_eastmoney_news
 from .eastmoney import get_stock as get_eastmoney_stock
 from .errors import (
@@ -80,6 +81,12 @@ TOOLS_CATEGORIES = {
             "get_macro_indicators",
         ]
     },
+    "capital_flow": {
+        "description": "A-share capital-flow and order-size data",
+        "tools": [
+            "get_capital_flow",
+        ]
+    },
     "prediction_markets": {
         "description": "Market-implied probabilities for forward-looking events",
         "tools": [
@@ -94,6 +101,7 @@ VENDOR_LIST = [
     "polymarket",
     "alpha_vantage",
     "eastmoney",
+    "eastmoney_moneyflow",
     "chinabond_web",
     "tushare",
     "local_note",
@@ -112,6 +120,10 @@ VENDOR_METHODS = {
         "eastmoney": get_stock_stats_indicators_window,
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+    },
+    "get_capital_flow": {
+        "eastmoney": get_eastmoney_capital_flow,
+        "eastmoney_moneyflow": get_eastmoney_capital_flow,
     },
     # fundamental_data
     "get_fundamentals": {

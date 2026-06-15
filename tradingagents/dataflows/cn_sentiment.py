@@ -17,6 +17,11 @@ GUBA_URLS = (
     "https://guba.eastmoney.com/list,{code}.html",
     "http://guba.eastmoney.com/list,{code}.html",
 )
+MOBILE_GUBA_URLS = (
+    "https://mguba.eastmoney.com/mguba/list/{code}%2Cf_2990",
+    "http://mguba.eastmoney.com/mguba/list/{code}%2Cf_2990",
+)
+THS_MOBILE_URL = "https://m.10jqka.com.cn/stockpage/hs_{code}/"
 TUSHARE_URL = "http://api.tushare.pro"
 REQUEST_TIMEOUT = 12
 MAX_POST_DETAILS = 8
@@ -39,16 +44,20 @@ def fetch_cn_sentiment_sources(
         return f"<cn sentiment unavailable: {ticker} is not a mainland China A-share code>"
 
     guba_block, company_name = _fetch_eastmoney_guba(code, start_date, end_date, limit)
+    mobile_guba_block = _fetch_eastmoney_mobile_guba(code, limit=max(8, min(limit, 24)))
+    ths_block = _fetch_10jqka_snapshot(code)
     tushare_block = _fetch_tushare_news(code, company_name, start_date, end_date)
 
     return "\n\n".join(
         [
             f"## Domestic China sentiment sources for {ticker} ({company_name or code})",
             guba_block,
+            mobile_guba_block,
+            ths_block,
             tushare_block,
             "Data note: East Money Guba is a public web source and is not a look-ahead-safe "
-            "historical archive. Treat it as a live retail-discussion snapshot around the "
-            "requested date, not as audited historical data.",
+            "historical archive. East Money mobile Guba and 10jqka mobile pages are live public "
+            "web snapshots. Treat them as retail-attention context, not audited historical data.",
         ]
     )
 
@@ -160,6 +169,136 @@ def _fetch_eastmoney_guba(
             lines.append(f"   Link: {post['link']}")
 
     return "\n".join(lines), company_name
+
+
+def _fetch_eastmoney_mobile_guba(code: str, limit: int) -> str:
+    last_error: Exception | None = None
+    text = ""
+    final_url = ""
+    for url_template in MOBILE_GUBA_URLS:
+        url = url_template.format(code=code)
+        for trust_env in (False, True):
+            try:
+                session = requests.Session()
+                session.trust_env = trust_env
+                response = session.get(
+                    url,
+                    timeout=REQUEST_TIMEOUT,
+                    headers={
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Referer": "https://mguba.eastmoney.com/",
+                        "User-Agent": "Mozilla/5.0",
+                    },
+                )
+                response.raise_for_status()
+                text = response.text
+                final_url = url
+                break
+            except requests.RequestException as exc:
+                last_error = exc
+                continue
+        if text:
+            break
+
+    if not text:
+        return (
+            "### East Money Mobile Guba\n"
+            f"<eastmoney mobile guba unavailable for {code}: "
+            f"{type(last_error).__name__ if last_error else 'unknown error'}>"
+        )
+
+    selector = Selector(text=text)
+    posts: list[dict[str, Any]] = []
+    for row in selector.css("#items > li"):
+        title = _clean_text(" ".join(row.css("p.content ::text, p.content::text").getall()))
+        title = re.sub(r"^(资讯|公告|问董秘)\s*", "", title).strip()
+        if not title:
+            continue
+        time_label = _clean_text(" ".join(row.css("p.time ::text, p.time::text").getall()))
+        reads = _parse_int(" ".join(row.css("p.time span::text").getall()))
+        href = row.css("a::attr(href)").get() or ""
+        posts.append(
+            {
+                "title": title,
+                "time_label": time_label,
+                "reads": reads,
+                "likes": _parse_int(" ".join(row.css(".like_count::text").getall())),
+                "link": urljoin(final_url, href.replace("//", "https://", 1) if href.startswith("//") else href),
+            }
+        )
+        if len(posts) >= limit:
+            break
+
+    if not posts:
+        return (
+            "### East Money Mobile Guba\n"
+            f"<no East Money mobile Guba rows found for {code}>"
+        )
+
+    lines = [
+        "### East Money Mobile Guba (second public forum entry, no API key)",
+        f"Source URL: {final_url}",
+        f"Parsed rows: {len(posts)}",
+        "",
+        "Recent mobile forum/news sample:",
+    ]
+    for index, post in enumerate(posts, 1):
+        lines.append(
+            f"{index}. {post['title']} | {post['time_label']} | "
+            f"reads: {post['reads']} | likes: {post['likes']}"
+        )
+        if post.get("link"):
+            lines.append(f"   Link: {post['link']}")
+    return "\n".join(lines)
+
+
+def _fetch_10jqka_snapshot(code: str) -> str:
+    url = THS_MOBILE_URL.format(code=code)
+    try:
+        session = requests.Session()
+        session.trust_env = False
+        response = session.get(
+            url,
+            timeout=REQUEST_TIMEOUT,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer": "https://m.10jqka.com.cn/",
+                "User-Agent": "Mozilla/5.0",
+            },
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        return f"### 10jqka mobile snapshot\n<10jqka unavailable for {code}: {type(exc).__name__}>"
+
+    selector = Selector(text=response.text)
+    title = _clean_text(selector.css("title::text").get() or "")
+    description = _clean_text(selector.css("meta[name=description]::attr(content)").get() or "")
+    keywords = ("资金", "主力", "点评", "新闻", "研报", "行业", "财务", "风险", "热度", "舆情")
+    candidates: list[str] = []
+    for raw in selector.css("body ::text").getall():
+        text = _clean_text(raw)
+        if len(text) < 8 or len(text) > 120:
+            continue
+        if any(keyword in text for keyword in keywords) and text not in candidates:
+            candidates.append(text)
+        if len(candidates) >= 10:
+            break
+
+    lines = [
+        "### 10jqka mobile snapshot (auxiliary public source, no API key)",
+        f"Source URL: {url}",
+    ]
+    if title:
+        lines.append(f"Page title: {title}")
+    if description:
+        lines.append(f"Description: {_truncate(description, 320)}")
+    if candidates:
+        lines.extend(["", "Extracted public-page signals:"])
+        for index, item in enumerate(candidates, 1):
+            lines.append(f"{index}. {item}")
+    else:
+        lines.append("<10jqka page loaded, but no stable static forum/news text was found>")
+    return "\n".join(lines)
 
 
 def _parse_guba_row(row: Selector, base_url: str, end_date: str) -> dict[str, Any] | None:

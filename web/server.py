@@ -4,14 +4,16 @@ import json
 import os
 import sys
 import threading
-import time
 import traceback
 import uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from html import escape
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -177,18 +179,23 @@ def classify_message(message: Any) -> tuple[str, str | None]:
 
 def normalize_ticker(ticker: str) -> str:
     try:
-        from tradingagents.dataflows.symbol_utils import normalize_symbol
+        from tradingagents.dataflows.eastmoney import normalize_a_share_code
 
-        return normalize_symbol(ticker)
+        return normalize_a_share_code(ticker) or ""
     except Exception:
-        return ticker.strip().upper()
+        value = (ticker or "").strip().upper()
+        return value if value.isdigit() and len(value) == 6 else ""
 
 
-def detect_asset_type(ticker: str) -> str:
-    canonical = normalize_ticker(ticker)
-    if canonical.endswith(("-USD", "-USDT", "-USDC", "-BTC", "-ETH")):
-        return "crypto"
-    return "stock"
+def validate_a_share_ticker(ticker: str) -> tuple[bool, str, str | None]:
+    code = normalize_ticker(ticker)
+    if code:
+        return True, code, None
+    return (
+        False,
+        "",
+        "当前版本专注中国大陆 A 股分析。请输入 6 位 A 股代码，例如 300308、688017；暂不支持 MU.O、AAPL 等美股代码。",
+    )
 
 
 def selected_analysts_from_payload(payload: dict[str, Any]) -> list[str]:
@@ -237,10 +244,10 @@ def provider_backend_url(provider: str) -> str | None:
 def market_data_vendor_chain() -> str:
     explicit = os.getenv("TRADINGAGENTS_DATA_VENDOR_CHAIN")
     if explicit:
-        return explicit
-    if os.getenv("ALPHA_VANTAGE_API_KEY"):
-        return "eastmoney,alpha_vantage,yfinance"
-    return "eastmoney,yfinance"
+        vendors = [item.strip().lower() for item in explicit.split(",") if item.strip()]
+        if "eastmoney" in vendors:
+            return "eastmoney"
+    return "eastmoney"
 
 
 def market_data_vendor_overrides() -> dict[str, str]:
@@ -251,8 +258,159 @@ def market_data_vendor_overrides() -> dict[str, str]:
         "technical_indicators": chain,
         "fundamental_data": chain,
         "news_data": chain,
+        "capital_flow": os.getenv("TRADINGAGENTS_CAPITAL_FLOW_VENDOR") or "eastmoney",
         "macro_data": macro_chain,
     }
+
+
+def build_run_docx(run: dict[str, Any]) -> bytes:
+    payload = run.get("payload") or {}
+    ticker = normalize_ticker(str(payload.get("ticker") or "")) or str(payload.get("ticker") or "")
+    analysis_date = payload.get("analysis_date") or ""
+    title = f"TradingAgents A股分析报告 - {ticker or '未命名标的'}"
+
+    body: list[str] = []
+    body.append(_docx_para(title, style="Title"))
+    body.append(_docx_para(f"生成时间：{now_iso()}"))
+    body.append(_docx_para(f"分析日期：{analysis_date}"))
+    body.append(_docx_para(f"运行状态：{run.get('status') or 'unknown'}"))
+    body.append(_docx_para(f"数据源：{market_data_vendor_chain()}；资金流：eastmoney"))
+    if run.get("error"):
+        body.append(_docx_para("运行错误", style="Heading1"))
+        body.append(_docx_para(str(run["error"])))
+
+    final = run.get("final") or {}
+    if final.get("decision"):
+        body.append(_docx_para("最终结论", style="Heading1"))
+        body.append(_docx_para(str(final["decision"])))
+
+    reports = run.get("reports") or {}
+    ordered_sections = [
+        "market_report",
+        "news_report",
+        "sentiment_report",
+        "fundamentals_report",
+        "investment_plan",
+        "trader_investment_plan",
+        "final_trade_decision",
+    ]
+    for section in ordered_sections:
+        content = reports.get(section)
+        if not content:
+            continue
+        body.append(_docx_para(SECTION_TITLES.get(section, section), style="Heading1"))
+        body.extend(_markdown_to_docx_paragraphs(str(content)))
+
+    stats = run.get("stats") or {}
+    body.append(_docx_para("运行统计", style="Heading1"))
+    for label, key in [
+        ("LLM 调用", "llm_calls"),
+        ("工具调用", "tool_calls"),
+        ("输入 Token", "tokens_in"),
+        ("输出 Token", "tokens_out"),
+    ]:
+        body.append(_docx_para(f"{label}：{stats.get(key, 0)}"))
+
+    body.append(_docx_para("分析过程流水", style="Heading1"))
+    for event in run.get("events", []):
+        event_type = event.get("type")
+        if event_type not in {"message", "tool", "error", "run"}:
+            continue
+        ts = str(event.get("ts", ""))[11:19]
+        if event_type == "tool":
+            text = f"[{ts}] TOOL {event.get('tool')}: {json.dumps(event.get('args') or {}, ensure_ascii=False)}"
+        elif event_type == "error":
+            text = f"[{ts}] ERROR {event.get('error')}"
+        elif event_type == "run":
+            text = f"[{ts}] RUN {event.get('ticker')} / {event.get('analysis_date')}"
+        else:
+            text = f"[{ts}] {event.get('message_type') or 'MESSAGE'}: {event.get('content') or ''}"
+        body.append(_docx_para(text[:1800]))
+
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body>"
+        + "".join(body)
+        + '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
+        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" '
+        'w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>'
+        "</w:body></w:document>"
+    )
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as docx:
+        docx.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            '<Override PartName="/word/styles.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+            "</Types>",
+        )
+        docx.writestr(
+            "_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+            'Target="word/document.xml"/></Relationships>',
+        )
+        docx.writestr("word/document.xml", document_xml)
+        docx.writestr("word/styles.xml", _docx_styles())
+    return buffer.getvalue()
+
+
+def _markdown_to_docx_paragraphs(text: str) -> list[str]:
+    paragraphs: list[str] = []
+    for raw in text.replace("\r\n", "\n").split("\n"):
+        line = raw.strip()
+        if not line:
+            paragraphs.append(_docx_para(""))
+            continue
+        if line.startswith("### "):
+            paragraphs.append(_docx_para(line[4:].strip(), style="Heading3"))
+        elif line.startswith("## "):
+            paragraphs.append(_docx_para(line[3:].strip(), style="Heading2"))
+        elif line.startswith("# "):
+            paragraphs.append(_docx_para(line[2:].strip(), style="Heading1"))
+        elif line.startswith("- "):
+            paragraphs.append(_docx_para("• " + line[2:].strip()))
+        else:
+            paragraphs.append(_docx_para(line))
+    return paragraphs
+
+
+def _docx_para(text: str, style: str | None = None) -> str:
+    style_xml = f'<w:pPr><w:pStyle w:val="{style}"/></w:pPr>' if style else ""
+    safe_text = escape(str(text), quote=False)
+    preserve = ' xml:space="preserve"' if safe_text.startswith(" ") or safe_text.endswith(" ") else ""
+    return f"<w:p>{style_xml}<w:r><w:t{preserve}>{safe_text}</w:t></w:r></w:p>"
+
+
+def _docx_styles() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:style w:type="paragraph" w:default="1" w:styleId="Normal">'
+        '<w:name w:val="Normal"/><w:qFormat/></w:style>'
+        '<w:style w:type="paragraph" w:styleId="Title">'
+        '<w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:qFormat/>'
+        '<w:rPr><w:b/><w:sz w:val="36"/></w:rPr></w:style>'
+        '<w:style w:type="paragraph" w:styleId="Heading1">'
+        '<w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:qFormat/>'
+        '<w:rPr><w:b/><w:sz w:val="30"/></w:rPr></w:style>'
+        '<w:style w:type="paragraph" w:styleId="Heading2">'
+        '<w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:qFormat/>'
+        '<w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:style>'
+        '<w:style w:type="paragraph" w:styleId="Heading3">'
+        '<w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:qFormat/>'
+        '<w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style>'
+        "</w:styles>"
+    )
 
 
 def run_real_analysis(run: dict[str, Any]) -> None:
@@ -261,12 +419,12 @@ def run_real_analysis(run: dict[str, Any]) -> None:
     from tradingagents.graph.trading_graph import TradingAgentsGraph
 
     payload = run["payload"]
-    ticker = normalize_ticker(payload.get("ticker", "SPY"))
-    asset_type = payload.get("asset_type") or detect_asset_type(ticker)
+    ok, ticker, validation_error = validate_a_share_ticker(payload.get("ticker", ""))
+    if not ok:
+        raise ValueError(validation_error)
+    asset_type = "stock"
     analysis_date = payload.get("analysis_date") or datetime.now().strftime("%Y-%m-%d")
     selected = selected_analysts_from_payload(payload)
-    if asset_type == "crypto":
-        selected = [a for a in selected if a != "fundamentals"]
 
     depth = int(payload.get("depth", 1))
     provider = payload.get("provider") or os.getenv("TRADINGAGENTS_LLM_PROVIDER") or "deepseek"
@@ -309,7 +467,8 @@ def run_real_analysis(run: dict[str, Any]) -> None:
     )
     init_agent_status(run, selected)
     append_event(run, "message", {"message_type": "System", "content": f"Starting analysis for {ticker} on {analysis_date}."})
-    append_event(run, "message", {"message_type": "System", "content": f"Market data vendors: {market_data_vendor_chain()}."})
+    append_event(run, "message", {"message_type": "System", "content": "A-share-only mode: mainland China six-digit tickers are supported."})
+    append_event(run, "message", {"message_type": "System", "content": f"Market data vendors: {market_data_vendor_chain()}; capital flow: eastmoney."})
 
     graph = TradingAgentsGraph(
         selected,
@@ -418,89 +577,9 @@ def run_real_analysis(run: dict[str, Any]) -> None:
     append_event(run, "complete", {"status": "completed", "final": run["final"]})
 
 
-def run_demo_analysis(run: dict[str, Any]) -> None:
-    payload = run["payload"]
-    ticker = normalize_ticker(payload.get("ticker", "NVDA"))
-    analysis_date = payload.get("analysis_date") or datetime.now().strftime("%Y-%m-%d")
-    selected = selected_analysts_from_payload(payload)
-    run["status"] = "running"
-    append_event(
-        run,
-        "run",
-        {
-            "status": "running",
-            "ticker": ticker,
-            "analysis_date": analysis_date,
-            "asset_type": detect_asset_type(ticker),
-            "provider": "demo",
-            "quick_model": "simulated",
-            "deep_model": "simulated",
-            "analysts": selected,
-        },
-    )
-    init_agent_status(run, selected)
-    demo_steps = [
-        ("Market Analyst", "market_report", "### Market Analysis\nPrice action is constructive but extended. Momentum is positive, while volatility warrants tighter sizing."),
-        ("News Analyst", "news_report", "### News Analysis\nRecent headlines support demand expectations, but macro policy uncertainty remains a near-term overhang."),
-        ("Sentiment Analyst", "sentiment_report", "### Sentiment Analysis\nSocial and news tone is moderately bullish, with crowd enthusiasm high enough to increase reversal risk."),
-        ("Fundamentals Analyst", "fundamentals_report", "### Fundamentals Analysis\nRevenue quality and margins look resilient. Valuation requires sustained growth to justify current multiples."),
-    ]
-    for agent, section, report in demo_steps:
-        if agent not in run["agent_status"]:
-            continue
-        set_agent(run, agent, "in_progress")
-        append_event(run, "message", {"message_type": "Agent", "content": f"{agent} is collecting evidence and drafting a memo."})
-        append_event(run, "tool", {"tool": "get_stock_data", "args": {"symbol": ticker, "window": "30d"}})
-        time.sleep(0.7)
-        update_report(run, section, report)
-        set_agent(run, agent, "completed")
-        run["stats"]["llm_calls"] += 1
-        run["stats"]["tool_calls"] += 2
-        run["stats"]["tokens_in"] += 1800
-        run["stats"]["tokens_out"] += 620
-        append_event(run, "stats", {"stats": run["stats"]})
-
-    for agent in FIXED_AGENTS["Research"]:
-        set_agent(run, agent, "in_progress")
-    time.sleep(0.6)
-    update_report(
-        run,
-        "investment_plan",
-        "### Research Manager Decision\nBull case has better evidence quality, but risk/reward is no longer asymmetric. Prefer a measured long bias rather than an aggressive entry.",
-    )
-    for agent in FIXED_AGENTS["Research"]:
-        set_agent(run, agent, "completed")
-    set_agent(run, "Trader", "in_progress")
-    time.sleep(0.6)
-    update_report(
-        run,
-        "trader_investment_plan",
-        "### Trader Plan\nStagger entry in two tranches, use a volatility-adjusted stop, and avoid adding if price loses the 20-day trend.",
-    )
-    set_agent(run, "Trader", "completed")
-    for agent in FIXED_AGENTS["Risk"]:
-        set_agent(run, agent, "in_progress")
-    time.sleep(0.6)
-    final = (
-        "### Portfolio Manager Decision\n"
-        "Rating: Mild Buy\n\n"
-        "Confidence: 64%\n\n"
-        "Rationale: The setup is constructive, but valuation and crowded sentiment argue for controlled exposure."
-    )
-    update_report(run, "final_trade_decision", final)
-    for agent in FIXED_AGENTS["Risk"] + FIXED_AGENTS["Portfolio"]:
-        set_agent(run, agent, "completed")
-    run["final"] = {"decision": "Mild Buy", "reports": run["reports"], "stats": run["stats"]}
-    run["status"] = "completed"
-    append_event(run, "complete", {"status": "completed", "final": run["final"]})
-
-
 def run_worker(run: dict[str, Any]) -> None:
     try:
-        if run["payload"].get("mode") == "demo":
-            run_demo_analysis(run)
-        else:
-            run_real_analysis(run)
+        run_real_analysis(run)
     except Exception as exc:
         run["status"] = "error"
         run["error"] = str(exc)
@@ -530,6 +609,23 @@ def response_json(handler: BaseHTTPRequestHandler, status: int, data: dict[str, 
     handler.wfile.write(body)
 
 
+def response_binary(
+    handler: BaseHTTPRequestHandler,
+    status: int,
+    body: bytes,
+    content_type: str,
+    filename: str | None = None,
+) -> None:
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    if filename:
+        handler.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 class TradingAgentsWebHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -548,6 +644,10 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
         path = parsed.path
         if path == "/api/config":
             self.handle_config()
+            return
+        if path.startswith("/api/runs/") and path.endswith("/report.docx"):
+            run_id = path.split("/")[3]
+            self.handle_report_docx(run_id)
             return
         if path.startswith("/api/runs/") and path.endswith("/events"):
             run_id = path.split("/")[3]
@@ -569,6 +669,12 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 response_json(self, 400, {"error": "Invalid JSON"})
                 return
+            ok, normalized, validation_error = validate_a_share_ticker(str(payload.get("ticker") or ""))
+            if not ok:
+                response_json(self, 400, {"error": validation_error})
+                return
+            payload["ticker"] = normalized
+            payload["mode"] = "real"
             run = make_run(payload)
             thread = threading.Thread(target=run_worker, args=(run,), daemon=True)
             thread.start()
@@ -601,12 +707,32 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
                 "output_language": os.getenv("TRADINGAGENTS_OUTPUT_LANGUAGE") or DEFAULT_CONFIG.get("output_language", "Chinese"),
                 "data_vendor_chain": market_data_vendor_chain(),
                 "macro_vendor_chain": os.getenv("TRADINGAGENTS_MACRO_VENDOR_CHAIN") or "chinabond_web,tushare,fred,local_note",
+                "capital_flow_vendor": os.getenv("TRADINGAGENTS_CAPITAL_FLOW_VENDOR") or "eastmoney",
+                "supported_market": "中国大陆 A 股",
+                "app_mode": "a_share_only",
                 "alpha_vantage_key_present": bool(os.getenv("ALPHA_VANTAGE_API_KEY")),
                 "fred_key_present": bool(os.getenv("FRED_API_KEY")),
                 "tushare_key_present": bool(os.getenv("TUSHARE_TOKEN") or os.getenv("TUSHARE_API_TOKEN")),
                 "api_key_env": key_env,
                 "api_key_present": bool(os.getenv(key_env)),
             },
+        )
+
+    def handle_report_docx(self, run_id: str) -> None:
+        run = RUNS.get(run_id)
+        if not run:
+            response_json(self, 404, {"error": "Run not found"})
+            return
+        body = build_run_docx(run)
+        payload = run.get("payload") or {}
+        ticker = normalize_ticker(str(payload.get("ticker") or "")) or "Ashare"
+        date = str(payload.get("analysis_date") or datetime.now().strftime("%Y-%m-%d")).replace("-", "")
+        response_binary(
+            self,
+            200,
+            body,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            f"TradingAgents_{ticker}_{date}.docx",
         )
 
     def handle_run(self, run_id: str) -> None:

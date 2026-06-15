@@ -32,6 +32,9 @@ from tradingagents.agents.utils.prediction_markets_tools import (
 from tradingagents.agents.utils.market_data_validation_tools import (
     get_verified_market_snapshot
 )
+from tradingagents.agents.utils.capital_flow_tools import (
+    get_capital_flow
+)
 
 logger = logging.getLogger(__name__)
 

@@ -7,6 +7,7 @@ import {
   CircleDot,
   Clock3,
   DatabaseZap,
+  FileDown,
   Gauge,
   Layers3,
   Play,
@@ -19,41 +20,65 @@ import {
 } from "lucide-react";
 
 const ANALYSTS = [
-  { key: "market", label: "Market", agent: "Market Analyst" },
-  { key: "news", label: "News", agent: "News Analyst" },
-  { key: "social", label: "Sentiment", agent: "Sentiment Analyst" },
-  { key: "fundamentals", label: "Fundamentals", agent: "Fundamentals Analyst" }
+  { key: "market", label: "技术面", agent: "Market Analyst" },
+  { key: "news", label: "新闻面", agent: "News Analyst" },
+  { key: "social", label: "情绪面", agent: "Sentiment Analyst" },
+  { key: "fundamentals", label: "基本面", agent: "Fundamentals Analyst" }
 ];
+
+const AGENT_LABELS = {
+  "Market Analyst": "技术面分析员",
+  "News Analyst": "新闻分析员",
+  "Sentiment Analyst": "情绪分析员",
+  "Fundamentals Analyst": "基本面分析员",
+  "Bull Researcher": "多头研究员",
+  "Bear Researcher": "空头研究员",
+  "Research Manager": "研究经理",
+  Trader: "交易员",
+  "Aggressive Analyst": "激进风控",
+  "Neutral Analyst": "中性风控",
+  "Conservative Analyst": "保守风控",
+  "Portfolio Manager": "组合经理"
+};
 
 const WORKFLOW = [
   {
-    desk: "Analysts",
+    desk: "分析组",
     icon: BarChart3,
     agents: ["Market Analyst", "News Analyst", "Sentiment Analyst", "Fundamentals Analyst"]
   },
   {
-    desk: "Research",
+    desk: "研究组",
     icon: Brain,
     agents: ["Bull Researcher", "Bear Researcher", "Research Manager"]
   },
-  { desk: "Trader", icon: TrendingUp, agents: ["Trader"] },
+  { desk: "交易员", icon: TrendingUp, agents: ["Trader"] },
   {
-    desk: "Risk",
+    desk: "风控组",
     icon: ShieldAlert,
     agents: ["Aggressive Analyst", "Neutral Analyst", "Conservative Analyst"]
   },
-  { desk: "Portfolio", icon: Gauge, agents: ["Portfolio Manager"] }
+  { desk: "组合经理", icon: Gauge, agents: ["Portfolio Manager"] }
 ];
 
 const REPORT_TABS = [
-  ["market_report", "Market"],
-  ["news_report", "News"],
-  ["sentiment_report", "Sentiment"],
-  ["fundamentals_report", "Fundamentals"],
-  ["investment_plan", "Debate"],
-  ["trader_investment_plan", "Trader"],
-  ["final_trade_decision", "Final"]
+  ["market_report", "技术面"],
+  ["news_report", "新闻面"],
+  ["sentiment_report", "情绪面"],
+  ["fundamentals_report", "基本面"],
+  ["investment_plan", "多空辩论"],
+  ["trader_investment_plan", "交易计划"],
+  ["final_trade_decision", "最终结论"]
 ];
+
+const EVENT_LABELS = {
+  System: "系统",
+  User: "用户",
+  Agent: "智能体",
+  Tool: "工具",
+  Data: "数据",
+  error: "错误"
+};
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -65,18 +90,43 @@ function compact(n) {
   return String(n);
 }
 
-function statusLabel(status) {
-  if (status === "completed") return "Complete";
-  if (status === "in_progress") return "Active";
-  if (status === "error") return "Error";
-  return "Queued";
+function normalizeATicker(value) {
+  const raw = (value || "").trim().toUpperCase().replace(/\s+/g, "");
+  const match = raw.match(/^(?:SH|SZ)?(\d{6})(?:\.(?:SH|SS|SZ))?$/i);
+  return match ? match[1] : "";
 }
 
-function MarkdownBlock({ text, empty = "No memo has been published yet." }) {
+function validateATicker(value) {
+  const code = normalizeATicker(value);
+  if (code) return { ok: true, code, message: "" };
+  return {
+    ok: false,
+    code: "",
+    message: "当前版本只支持中国大陆 A 股六位代码，例如 300308、688017。"
+  };
+}
+
+function statusLabel(status) {
+  if (status === "completed") return "完成";
+  if (status === "in_progress") return "进行中";
+  if (status === "error") return "错误";
+  return "等待";
+}
+
+function runStateLabel(status) {
+  if (status === "completed") return "已完成";
+  if (status === "running") return "分析中";
+  if (status === "queued") return "排队中";
+  if (status === "error") return "出错";
+  return "待开始";
+}
+
+function MarkdownBlock({ text, empty = "暂无内容。" }) {
   if (!text) return <p className="empty-text">{empty}</p>;
+  const normalized = text.replace(/<br\s*\/?>/gi, "\n");
   return (
     <div className="markdown-block">
-      {text.split("\n").map((line, index) => {
+      {normalized.split("\n").map((line, index) => {
         const key = `${index}-${line}`;
         if (!line.trim()) return <div key={key} className="md-space" />;
         if (line.startsWith("### ")) return <h3 key={key}>{line.replace("### ", "")}</h3>;
@@ -94,7 +144,7 @@ function ConnectionPill({ config, runStatus }) {
   return (
     <div className={`connection-pill ${live ? "live" : ""}`}>
       <Radio size={15} />
-      <span>{live ? "Streaming" : "Ready"}</span>
+      <span>{live ? "运行中" : "就绪"}</span>
       <strong>{config.provider || "provider"}</strong>
     </div>
   );
@@ -109,11 +159,11 @@ function AgentCard({ group, agentStatus }) {
     <section className={`agent-card ${active ? "active" : ""} ${completed ? "done" : ""}`}>
       <div className="agent-card-top">
         <div className="agent-icon">
-          <Icon size={19} />
+          <Icon size={18} />
         </div>
         <div>
           <h3>{group.desk}</h3>
-          <span>{active ? "In motion" : completed ? "Cleared" : "Waiting"}</span>
+          <span>{active ? "正在处理" : completed ? "已完成" : "等待中"}</span>
         </div>
       </div>
       <div className="agent-list">
@@ -122,7 +172,7 @@ function AgentCard({ group, agentStatus }) {
           return (
             <div className="agent-row" key={agent}>
               <span className={`dot ${status}`} />
-              <span>{agent}</span>
+              <span>{AGENT_LABELS[agent] || agent}</span>
               <em>{statusLabel(status)}</em>
             </div>
           );
@@ -137,29 +187,32 @@ function EventFeed({ events }) {
     <section className="panel feed-panel">
       <div className="panel-title">
         <div>
-          <span className="eyeline">Live tape</span>
+          <span className="eyeline">过程流水</span>
           <h2>Signal feed</h2>
         </div>
         <Activity size={18} />
       </div>
       <div className="feed-list">
         {events.length === 0 ? (
-          <p className="empty-text">Run a task to watch model messages and tool calls stream in.</p>
+          <p className="empty-text">开始真实分析后，这里会显示工具调用和智能体消息。</p>
         ) : (
-          events.map((event) => (
-            <article className={`feed-item ${event.type}`} key={`${event.seq}-${event.ts}`}>
-              <div className="feed-kind">{event.type === "tool" ? "Tool" : event.message_type || event.type}</div>
-              <p>{event.type === "tool" ? `${event.tool} ${JSON.stringify(event.args || {})}` : event.content || event.error}</p>
-              <time>{event.ts?.slice(11, 19)}</time>
-            </article>
-          ))
+          events.map((event) => {
+            const kind = event.type === "tool" ? "Tool" : event.message_type || event.type;
+            return (
+              <article className={`feed-item ${event.type}`} key={`${event.seq}-${event.ts}`}>
+                <div className="feed-kind">{EVENT_LABELS[kind] || kind}</div>
+                <p>{event.type === "tool" ? `${event.tool} ${JSON.stringify(event.args || {})}` : event.content || event.error}</p>
+                <time>{event.ts?.slice(11, 19)}</time>
+              </article>
+            );
+          })
         )}
       </div>
     </section>
   );
 }
 
-function ConfigRail({ form, setForm, config, onRun, running }) {
+function ConfigRail({ form, setForm, config, onRun, running, validation }) {
   const toggleAnalyst = (key) => {
     setForm((current) => {
       const exists = current.analysts.includes(key);
@@ -174,25 +227,26 @@ function ConfigRail({ form, setForm, config, onRun, running }) {
     <aside className="config-rail">
       <div className="brand-block">
         <div className="brand-mark">
-          <Layers3 size={24} />
+          <Layers3 size={23} />
         </div>
         <div>
-          <h1>TradingAgents</h1>
-          <span>Research console</span>
+          <h1>A 股研究台</h1>
+          <span>TradingAgents 本地控制台</span>
         </div>
       </div>
 
       <div className="form-stack">
         <label>
-          <span>Ticker</span>
+          <span>股票代码</span>
           <input
             value={form.ticker}
             onChange={(event) => setForm({ ...form, ticker: event.target.value.toUpperCase() })}
-            placeholder="NVDA"
+            placeholder="例如 300308"
           />
+          {!validation.ok && form.ticker ? <small className="field-error">{validation.message}</small> : null}
         </label>
         <label>
-          <span>Analysis date</span>
+          <span>分析日期</span>
           <input
             type="date"
             value={form.analysis_date}
@@ -200,16 +254,16 @@ function ConfigRail({ form, setForm, config, onRun, running }) {
           />
         </label>
         <label>
-          <span>Research depth</span>
+          <span>研究深度</span>
           <select value={form.depth} onChange={(event) => setForm({ ...form, depth: Number(event.target.value) })}>
-            <option value={1}>Focused - 1 round</option>
-            <option value={3}>Balanced - 3 rounds</option>
-            <option value={5}>Deep - 5 rounds</option>
+            <option value={1}>快速 - 1 轮辩论</option>
+            <option value={3}>均衡 - 3 轮辩论</option>
+            <option value={5}>深入 - 5 轮辩论</option>
           </select>
         </label>
 
         <div className="analyst-picker">
-          <span>Analyst desk</span>
+          <span>分析模块</span>
           {ANALYSTS.map((analyst) => (
             <button
               className={form.analysts.includes(analyst.key) ? "selected" : ""}
@@ -223,67 +277,40 @@ function ConfigRail({ form, setForm, config, onRun, running }) {
           ))}
         </div>
 
-        <div className="mode-switch">
-          <button
-            className={form.mode === "real" ? "selected" : ""}
-            type="button"
-            onClick={() => setForm({ ...form, mode: "real" })}
-          >
-            Real run
-          </button>
-          <button
-            className={form.mode === "demo" ? "selected" : ""}
-            type="button"
-            onClick={() => setForm({ ...form, mode: "demo" })}
-          >
-            Demo
-          </button>
-        </div>
-
         <div className="provider-card">
           <div>
-            <span>Provider</span>
+            <span>市场范围</span>
+            <strong>{config.supported_market || "中国大陆 A 股"}</strong>
+          </div>
+          <div>
+            <span>模型</span>
             <strong>{config.provider || "deepseek"}</strong>
           </div>
           <div>
             <span>API key</span>
             <strong className={config.api_key_present ? "ok" : "warn"}>
-              {config.api_key_present ? "Detected" : "Missing"}
+              {config.api_key_present ? "已检测" : "缺失"}
             </strong>
           </div>
           <div>
-            <span>Data</span>
-            <strong className="vendor-chain">{config.data_vendor_chain || "yfinance"}</strong>
+            <span>行情</span>
+            <strong className="vendor-chain">{config.data_vendor_chain || "eastmoney"}</strong>
           </div>
           <div>
-            <span>AV key</span>
-            <strong className={config.alpha_vantage_key_present ? "ok" : "warn"}>
-              {config.alpha_vantage_key_present ? "Detected" : "Missing"}
-            </strong>
+            <span>资金流</span>
+            <strong className="vendor-chain">{config.capital_flow_vendor || "eastmoney"}</strong>
           </div>
           <div>
-            <span>Macro</span>
-            <strong className="vendor-chain">{config.macro_vendor_chain || "chinabond_web,tushare,fred,local_note"}</strong>
-          </div>
-          <div>
-            <span>Tushare</span>
-            <strong className={config.tushare_key_present ? "ok" : "muted"}>
-              {config.tushare_key_present ? "Detected" : "Optional"}
-            </strong>
-          </div>
-          <div>
-            <span>FRED</span>
-            <strong className={config.fred_key_present ? "ok" : "muted"}>
-              {config.fred_key_present ? "Detected" : "Optional"}
-            </strong>
+            <span>宏观</span>
+            <strong className="vendor-chain">{config.macro_vendor_chain || "chinabond_web,local_note"}</strong>
           </div>
           <small>{config.quick_model || "deepseek-chat"} / {config.deep_model || "deepseek-chat"}</small>
         </div>
       </div>
 
-      <button className="run-button" type="button" disabled={running} onClick={onRun}>
+      <button className="run-button" type="button" disabled={running || !validation.ok} onClick={onRun}>
         {running ? <Square size={17} /> : <Play size={17} />}
-        {running ? "Analysis running" : "Run analysis"}
+        {running ? "正在分析" : "开始真实分析"}
       </button>
     </aside>
   );
@@ -294,13 +321,13 @@ export default function App() {
   const terminalRef = useRef(false);
   const [config, setConfig] = useState({});
   const [form, setForm] = useState({
-    ticker: "NVDA",
+    ticker: "300308",
     analysis_date: today(),
     depth: 1,
-    mode: "demo",
     analysts: ["market", "news", "social", "fundamentals"]
   });
   const [runStatus, setRunStatus] = useState("idle");
+  const [runId, setRunId] = useState(null);
   const [runMeta, setRunMeta] = useState(null);
   const [agentStatus, setAgentStatus] = useState({});
   const [events, setEvents] = useState([]);
@@ -318,6 +345,7 @@ export default function App() {
     return () => eventSource.current?.close();
   }, []);
 
+  const validation = useMemo(() => validateATicker(form.ticker), [form.ticker]);
   const running = runStatus === "running" || runStatus === "queued";
 
   const visibleEvents = useMemo(
@@ -330,7 +358,7 @@ export default function App() {
   const totalAgents = Object.keys(agentStatus).length || 1;
 
   function ingest(event) {
-    setEvents((current) => [event, ...current].slice(0, 180));
+    setEvents((current) => [event, ...current].slice(0, 220));
     if (event.status) setRunStatus(event.status);
     if (event.agent_status) setAgentStatus({ ...event.agent_status });
     if (event.reports) setReports({ ...event.reports });
@@ -352,9 +380,17 @@ export default function App() {
   }
 
   async function startRun() {
+    const validated = validateATicker(form.ticker);
+    if (!validated.ok) {
+      setRunStatus("error");
+      setError(validated.message);
+      return;
+    }
+
     eventSource.current?.close();
     terminalRef.current = false;
     setRunStatus("queued");
+    setRunId(null);
     setRunMeta(null);
     setAgentStatus({});
     setEvents([]);
@@ -368,6 +404,7 @@ export default function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
+        ticker: validated.code,
         provider: config.provider || "deepseek",
         quick_model: config.quick_model || "deepseek-chat",
         deep_model: config.deep_model || "deepseek-chat",
@@ -378,9 +415,10 @@ export default function App() {
     if (!response.ok) {
       terminalRef.current = true;
       setRunStatus("error");
-      setError(data.error || "Unable to start analysis.");
+      setError(data.error || "无法开始分析。");
       return;
     }
+    setRunId(data.run_id);
     const source = new EventSource(`/api/runs/${data.run_id}/events`);
     eventSource.current = source;
     ["run", "state", "agent", "message", "tool", "report", "stats", "complete", "error"].forEach((type) => {
@@ -405,7 +443,7 @@ export default function App() {
         if (snapshot.status === "error") {
           terminalRef.current = true;
           source.close();
-          setError(snapshot.error || "Run failed.");
+          setError(snapshot.error || "分析失败。");
           setRunStatus("error");
           return;
         }
@@ -416,15 +454,27 @@ export default function App() {
     };
   }
 
+  function downloadReport() {
+    if (!runId || running) return;
+    window.open(`/api/runs/${runId}/report.docx`, "_blank", "noopener,noreferrer");
+  }
+
   return (
     <main className="app-shell">
-      <ConfigRail form={form} setForm={setForm} config={config} onRun={startRun} running={running} />
+      <ConfigRail
+        form={form}
+        setForm={setForm}
+        config={config}
+        onRun={startRun}
+        running={running}
+        validation={validation}
+      />
 
       <section className="workspace">
         <header className="topbar">
           <div>
-            <span className="eyeline">Institutional multi-agent research</span>
-            <h2>{runMeta ? `${runMeta.ticker} / ${runMeta.analysis_date}` : "Research Command Center"}</h2>
+            <span className="eyeline">A 股多智能体投研流程</span>
+            <h2>{runMeta ? `${runMeta.ticker} / ${runMeta.analysis_date}` : "等待输入 A 股标的"}</h2>
           </div>
           <div className="topbar-actions">
             <ConnectionPill config={config} runStatus={runStatus} />
@@ -434,25 +484,29 @@ export default function App() {
             </div>
             <div className="stat-chip">
               <DatabaseZap size={15} />
-              Tools {stats.tool_calls}
+              工具 {stats.tool_calls}
             </div>
+            <button className="download-button" type="button" disabled={!runId || running} onClick={downloadReport}>
+              <FileDown size={16} />
+              下载 Word
+            </button>
           </div>
         </header>
 
         <div className="metrics-row">
           <article>
-            <span>Agent progress</span>
+            <span>智能体进度</span>
             <strong>{completedAgents}/{totalAgents}</strong>
             <div className="meter"><i style={{ width: `${(completedAgents / totalAgents) * 100}%` }} /></div>
           </article>
           <article>
-            <span>Token flow</span>
+            <span>Token 流量</span>
             <strong>{compact(stats.tokens_in)} in / {compact(stats.tokens_out)} out</strong>
-            <div className="meter cyan"><i style={{ width: stats.tokens_out ? "68%" : "12%" }} /></div>
+            <div className="meter teal"><i style={{ width: stats.tokens_out ? "68%" : "12%" }} /></div>
           </article>
           <article>
-            <span>Run state</span>
-            <strong>{runStatus}</strong>
+            <span>运行状态</span>
+            <strong>{runStateLabel(runStatus)}</strong>
             <div className="meter amber"><i style={{ width: running ? "54%" : runStatus === "completed" ? "100%" : "10%" }} /></div>
           </article>
         </div>
@@ -462,7 +516,7 @@ export default function App() {
             <div className="panel-title">
               <div>
                 <span className="eyeline">Agent orchestration</span>
-                <h2>Workflow board</h2>
+                <h2>工作流看板</h2>
               </div>
               <TerminalSquare size={18} />
             </div>
@@ -481,7 +535,7 @@ export default function App() {
             <div className="panel-title">
               <div>
                 <span className="eyeline">Research output</span>
-                <h2>Live memo</h2>
+                <h2>实时备忘录</h2>
               </div>
               <Clock3 size={18} />
             </div>
@@ -500,24 +554,24 @@ export default function App() {
             <div className="panel-title">
               <div>
                 <span className="eyeline">Portfolio desk</span>
-                <h2>Final verdict</h2>
+                <h2>最终意见</h2>
               </div>
               <CircleDot size={18} />
             </div>
             {error ? (
               <div className="error-box">
-                <strong>Run failed</strong>
+                <strong>分析未完成</strong>
                 <p>{error}</p>
               </div>
             ) : (
               <>
                 <div className="verdict-score">
-                  <span>{final?.decision || "Awaiting decision"}</span>
-                  <strong>{final ? "Ready" : "Pending"}</strong>
+                  <span>{final?.decision || "等待组合经理决策"}</span>
+                  <strong>{final ? "可下载" : "生成中"}</strong>
                 </div>
                 <MarkdownBlock
                   text={reports.final_trade_decision}
-                  empty="The portfolio manager decision will appear after risk review."
+                  empty="风控评审结束后，这里会显示组合经理的最终意见。"
                 />
               </>
             )}
