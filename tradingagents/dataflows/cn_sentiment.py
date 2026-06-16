@@ -35,9 +35,11 @@ def fetch_cn_sentiment_sources(
 ) -> str:
     """Fetch China A-share sentiment inputs from domestic sources.
 
-    East Money Guba is used as the default no-key retail forum source. Tushare
-    Pro news is tried when a token is configured, but many accounts need extra
-    permissions for the news endpoints, so it always degrades to a note.
+    East Money Guba is used as the default no-key retail forum source.
+    The 10jqka mobile page is only an auxiliary public-page snapshot because
+    it does not expose a stable no-key forum post list. Tushare Pro news is
+    tried when a token is configured, but many accounts need extra permissions
+    for the news endpoints, so it always degrades to a note.
     """
     code = normalize_a_share_code(ticker)
     if not code:
@@ -56,8 +58,9 @@ def fetch_cn_sentiment_sources(
             ths_block,
             tushare_block,
             "Data note: East Money Guba is a public web source and is not a look-ahead-safe "
-            "historical archive. East Money mobile Guba and 10jqka mobile pages are live public "
-            "web snapshots. Treat them as retail-attention context, not audited historical data.",
+            "historical archive. East Money mobile Guba is a live public forum snapshot. "
+            "10jqka is only a public-page auxiliary snapshot unless stable post rows are "
+            "explicitly listed above; do not weight it as forum-post sentiment otherwise.",
         ]
     )
 
@@ -268,7 +271,11 @@ def _fetch_10jqka_snapshot(code: str) -> str:
         )
         response.raise_for_status()
     except requests.RequestException as exc:
-        return f"### 10jqka mobile snapshot\n<10jqka unavailable for {code}: {type(exc).__name__}>"
+        return (
+            "### 10jqka public page (auxiliary, not a stable forum source)\n"
+            f"<10jqka unavailable for {code}: {type(exc).__name__}. "
+            "No 10jqka forum-post data was used.>"
+        )
 
     selector = Selector(text=response.text)
     title = _clean_text(selector.css("title::text").get() or "")
@@ -285,8 +292,9 @@ def _fetch_10jqka_snapshot(code: str) -> str:
             break
 
     lines = [
-        "### 10jqka mobile snapshot (auxiliary public source, no API key)",
+        "### 10jqka public page (auxiliary, not a stable forum source)",
         f"Source URL: {url}",
+        "Forum-post status: no stable no-key post list was found; this source is not weighted as forum sentiment.",
     ]
     if title:
         lines.append(f"Page title: {title}")
@@ -297,7 +305,9 @@ def _fetch_10jqka_snapshot(code: str) -> str:
         for index, item in enumerate(candidates, 1):
             lines.append(f"{index}. {item}")
     else:
-        lines.append("<10jqka page loaded, but no stable static forum/news text was found>")
+        lines.append(
+            "<10jqka page loaded, but no stable forum-post rows or usable public-page signals were found>"
+        )
     return "\n".join(lines)
 
 

@@ -14,7 +14,7 @@
 - 当前 Web 版本专注中国大陆 A 股。`MU.O`、`AAPL` 等美股代码会在运行前被拒绝，避免跑到中途才因为数据源不匹配失败。
 - 针对 A 股做了数据源改造，默认使用东方财富公开行情数据，减少对海外站点的依赖。
 - 新增东方财富资金流数据，市场分析会纳入主力净流入、超大单/大单/中单/小单等 A 股特有交易线索。
-- 接入东方财富 PC/移动股吧、同花顺移动公开页、个股新闻和 F10 信息，用于新闻、情绪面和基本面分析。
+- 接入东方财富 PC/移动股吧、个股新闻和 F10 信息；同花顺移动公开页仅作为辅助公开页快照，不作为稳定论坛帖源。
 - 接入中债网页源作为中国收益率曲线优先来源，获取不到时会给出温和的数据缺口说明，而不是直接让整轮分析报错。
 - 每次分析结束后可以下载 Word `.docx` 报告，包含各阶段 memo、最终结论和事件流水。
 - 支持 DeepSeek 等 LLM Provider，并在网页侧展示 API key 是否已检测到，但不会展示具体密钥。
@@ -31,10 +31,9 @@
 | --- | --- | --- |
 | A 股行情 | 东方财富 | 优先用于日线行情、技术指标和市场快照 |
 | A 股资金流 | 东方财富 | 用于主力净流入、超大单、大单、中单、小单分析 |
-| A 股新闻/社区 | 东方财富个股新闻、PC/移动股吧、同花顺移动公开页 | 用于新闻面和情绪面分析 |
+| A 股新闻/社区 | 东方财富个股新闻、PC/移动股吧；同花顺移动公开页辅助快照 | 东方财富股吧是主要社区源；同花顺未返回稳定帖子时只记录数据缺口 |
 | A 股基本面 | 东方财富 F10 | 用于公司概况和关键财务指标 |
 | 中国宏观利率 | 中债网页源 | 优先获取人民币国债收益率曲线 |
-| 海外宏观 | FRED | 配置 `FRED_API_KEY` 后启用 |
 | 可选付费源 | Tushare Pro | 默认不启用新闻接口，除非你明确配置并拥有对应权限 |
 
 如果公开网页源临时不可用，系统会尽量把问题记录为“数据缺口”，避免因为单个数据源失败导致整轮多智能体工作流中断。
@@ -82,8 +81,9 @@ TRADINGAGENTS_DEEP_THINK_LLM=deepseek-v4-pro
 TRADINGAGENTS_QUICK_THINK_LLM=deepseek-v4-pro
 TRADINGAGENTS_DATA_VENDOR_CHAIN=eastmoney
 TRADINGAGENTS_CAPITAL_FLOW_VENDOR=eastmoney
-TRADINGAGENTS_MACRO_VENDOR_CHAIN=chinabond_web,tushare,fred,local_note
+TRADINGAGENTS_MACRO_VENDOR_CHAIN=chinabond_web,local_note
 TRADINGAGENTS_ENABLE_TUSHARE_NEWS=0
+TRADINGAGENTS_ENABLE_TUSHARE_MACRO=0
 ```
 
 可选 key：
@@ -91,7 +91,6 @@ TRADINGAGENTS_ENABLE_TUSHARE_NEWS=0
 | Key | 用途 | 获取地址 |
 | --- | --- | --- |
 | `DEEPSEEK_API_KEY` | 大模型推理 | <https://platform.deepseek.com/> |
-| `FRED_API_KEY` | 美国宏观数据 | <https://fred.stlouisfed.org/docs/api/api_key.html> |
 | `TUSHARE_TOKEN` | 可选付费数据源 | <https://tushare.pro/> |
 
 `.env` 已经被 `.gitignore` 忽略，不要把真实 API key 提交到 GitHub。
@@ -120,9 +119,11 @@ http://127.0.0.1:5173
 
 ## 稳定性说明
 
-- 中国大陆网络环境下，东方财富、中债网页源、同花顺移动公开页通常比 Yahoo Finance、Reddit、StockTwits、FRED 等海外源更稳定。
+- 中国大陆网络环境下，东方财富和中债网页源通常比 Yahoo Finance、Reddit、StockTwits、FRED 等海外源更稳定；Web 版 A 股流程不再调用这些海外论坛和宏观工具。
+- 同花顺移动公开页没有稳定的免 key 帖子列表，因此只作为辅助公开页快照；拿不到稳定内容时会写成数据缺口，不参与论坛情绪权重。
 - 免费公开接口可能变更字段、限频或临时不可用，因此资金流、社区页和宏观数据都会尽量降级为“数据缺口说明”，而不是直接中断工作流。
 - Tushare 的部分新闻和高阶接口需要付费权限，本版本默认关闭 Tushare 新闻，避免无权限时报错。
+- Tushare 宏观源也默认不启用；只有显式设置 `TRADINGAGENTS_ENABLE_TUSHARE_MACRO=1` 时才会进入宏观链。
 - 如果宏观数据拿不到，系统会把它写成数据缺口说明，不会再因为单个宏观工具失败而终止整轮分析。
 
 ## 项目结构

@@ -250,9 +250,23 @@ def market_data_vendor_chain() -> str:
     return "eastmoney"
 
 
+def macro_data_vendor_chain() -> str:
+    raw = os.getenv("TRADINGAGENTS_MACRO_VENDOR_CHAIN") or "chinabond_web,local_note"
+    allow_tushare = os.getenv("TRADINGAGENTS_ENABLE_TUSHARE_MACRO", "").lower() in {"1", "true", "yes", "on"}
+    allowed = ("chinabond_web", "local_note") if not allow_tushare else ("chinabond_web", "tushare", "local_note")
+    seen: set[str] = set()
+    selected: list[str] = []
+    for item in raw.split(","):
+        vendor = item.strip().lower()
+        if vendor in allowed and vendor not in seen:
+            selected.append(vendor)
+            seen.add(vendor)
+    return ",".join(selected) or "chinabond_web,local_note"
+
+
 def market_data_vendor_overrides() -> dict[str, str]:
     chain = market_data_vendor_chain()
-    macro_chain = os.getenv("TRADINGAGENTS_MACRO_VENDOR_CHAIN") or "chinabond_web,tushare,fred,local_note"
+    macro_chain = macro_data_vendor_chain()
     return {
         "core_stock_apis": chain,
         "technical_indicators": chain,
@@ -706,7 +720,7 @@ class TradingAgentsWebHandler(BaseHTTPRequestHandler):
                 "deep_model": os.getenv("TRADINGAGENTS_DEEP_THINK_LLM") or DEFAULT_CONFIG.get("deep_think_llm", "deepseek-chat"),
                 "output_language": os.getenv("TRADINGAGENTS_OUTPUT_LANGUAGE") or DEFAULT_CONFIG.get("output_language", "Chinese"),
                 "data_vendor_chain": market_data_vendor_chain(),
-                "macro_vendor_chain": os.getenv("TRADINGAGENTS_MACRO_VENDOR_CHAIN") or "chinabond_web,tushare,fred,local_note",
+                "macro_vendor_chain": macro_data_vendor_chain(),
                 "capital_flow_vendor": os.getenv("TRADINGAGENTS_CAPITAL_FLOW_VENDOR") or "eastmoney",
                 "supported_market": "中国大陆 A 股",
                 "app_mode": "a_share_only",

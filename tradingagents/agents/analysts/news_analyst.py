@@ -1,31 +1,36 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
-    get_global_news,
     get_language_instruction,
     get_macro_indicators,
     get_news,
-    get_prediction_markets,
 )
-from tradingagents.dataflows.config import get_config
 
 
 def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
-        asset_type = state.get("asset_type", "stock")
-        asset_label = "company" if asset_type == "stock" else "asset"
         instrument_context = get_instrument_context_from_state(state)
 
         tools = [
             get_news,
-            get_global_news,
             get_macro_indicators,
-            get_prediction_markets,
         ]
 
         system_message = (
-            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) to ground macro commentary in actual data. For mainland China A-shares, request `china_yield_curve` to use the ChinaBond RMB government-bond yield curve. For U.S./global macro, request FRED-style indicators such as 'cpi', 'core_pce', 'unemployment', 'fed_funds_rate', '10y_treasury', or 'yield_curve'. Use get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events). Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            "You are a domestic China A-share news researcher. Produce a "
+            "comprehensive report for the target A-share using only China-local "
+            "company news and domestic macro context. Use get_news(query, "
+            "start_date, end_date) for company-specific A-share news. If macro "
+            "context is necessary, use get_macro_indicators with "
+            "`china_yield_curve` to retrieve the ChinaBond RMB government-bond "
+            "yield curve. Do not request or discuss Yahoo Finance, Reddit, "
+            "StockTwits, FRED, Polymarket, Fed-rate probabilities, U.S. CPI, "
+            "U.S. Treasury yields, or other overseas forum/global-news sources "
+            "unless the domestic source packet itself explicitly mentions them. "
+            "If a domestic source is sparse or unavailable, report it as a data "
+            "gap and continue instead of inventing evidence. Provide specific, "
+            "actionable insights with supporting evidence for A-share traders."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()
         )

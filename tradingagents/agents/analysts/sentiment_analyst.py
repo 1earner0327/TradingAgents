@@ -1,4 +1,4 @@
-"""Sentiment analyst — multi-source sentiment analysis for a target ticker.
+"""Sentiment analyst — domestic A-share sentiment analysis for a target ticker.
 
 Previously named ``social_media_analyst``. Renamed and redesigned because
 the old version had a prompt that demanded social-media analysis but the
@@ -6,10 +6,10 @@ only tool available was Yahoo Finance news — which led LLMs to fabricate
 Reddit/X/StockTwits content under prompt pressure (verified live).
 
 The redesigned agent pre-fetches complementary data sources before the LLM
-is invoked and injects them into the prompt as structured blocks. Mainland
-China A-shares use domestic sources (East Money Guba desktop/mobile, 10jqka
-mobile snapshot, and optional Tushare Pro news). Other instruments keep the
-original Yahoo Finance + StockTwits + Reddit source mix.
+is invoked and injects them into the prompt as structured blocks. This fork's
+web console is A-share-only, so the analyst uses domestic sources: East Money
+Guba desktop/mobile as the primary retail discussion source, an auxiliary
+10jqka public-page snapshot, and optional Tushare Pro news when configured.
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -31,16 +31,12 @@ from tradingagents.agents.schemas import SentimentReport, render_sentiment_repor
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
-    get_news,
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
 from tradingagents.dataflows.cn_sentiment import fetch_cn_sentiment_sources
-from tradingagents.dataflows.eastmoney import is_a_share_symbol
-from tradingagents.dataflows.reddit import fetch_reddit_posts
-from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
 
 def _seven_days_back(trade_date: str) -> str:
@@ -66,27 +62,13 @@ def create_sentiment_analyst(llm):
         # Pre-fetch source data before the model is invoked. Each fetcher
         # degrades gracefully and returns a string, so the LLM sees real data
         # or an explicit placeholder instead of being pressured to invent.
-        if is_a_share_symbol(ticker):
-            domestic_block = fetch_cn_sentiment_sources(ticker, start_date, end_date)
-            system_message = _build_china_system_message(
-                ticker=ticker,
-                start_date=start_date,
-                end_date=end_date,
-                domestic_block=domestic_block,
-            )
-        else:
-            news_block = get_news.func(ticker, start_date, end_date)
-            stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-            reddit_block = fetch_reddit_posts(ticker)
-
-            system_message = _build_global_system_message(
-                ticker=ticker,
-                start_date=start_date,
-                end_date=end_date,
-                news_block=news_block,
-                stocktwits_block=stocktwits_block,
-                reddit_block=reddit_block,
-            )
+        domestic_block = fetch_cn_sentiment_sources(ticker, start_date, end_date)
+        system_message = _build_china_system_message(
+            ticker=ticker,
+            start_date=start_date,
+            end_date=end_date,
+            domestic_block=domestic_block,
+        )
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -139,8 +121,8 @@ def _build_china_system_message(
 
 ## Data sources (pre-fetched, in this prompt)
 
-### China A-share sentiment packet — East Money Guba, East Money mobile Guba, 10jqka, plus optional Tushare Pro news
-East Money Guba is the primary domestic retail-investor discussion source. East Money mobile Guba is a second public entry point that can expose additional live rows when the desktop page is sparse. 10jqka mobile is an auxiliary public page snapshot; use it as supportive context only when it exposes stable static text. Tushare Pro news, when available, is a supplementary domestic news feed rather than a forum.
+### China A-share sentiment packet — East Money Guba, East Money mobile Guba, 10jqka public page, plus optional Tushare Pro news
+East Money Guba is the primary domestic retail-investor discussion source. East Money mobile Guba is a second public entry point that can expose additional live rows when the desktop page is sparse. 10jqka is treated only as an auxiliary public-page snapshot. Do not treat 10jqka as forum-post evidence unless the packet explicitly contains stable post rows. Tushare Pro news, when available, is a supplementary domestic news feed rather than a forum.
 
 <start_of_china_sentiment>
 {domestic_block}
@@ -148,7 +130,7 @@ East Money Guba is the primary domestic retail-investor discussion source. East 
 
 ## How to analyze this data (best practices)
 
-1. **Prioritize domestic evidence for A-shares.** Do not analyze Yahoo Finance, StockTwits, Reddit, or other overseas forums unless they are explicitly present in the source packet. For this A-share run, the relevant retail sentiment sources are East Money Guba desktop/mobile, plus any stable 10jqka public-page signals.
+1. **Prioritize domestic evidence for A-shares.** Do not analyze Yahoo Finance, StockTwits, Reddit, or other overseas forums for A-share sentiment. For this A-share run, the relevant retail sentiment sources are East Money Guba desktop/mobile. 10jqka public-page text is supportive context only, not forum sentiment, unless stable post rows are explicitly present.
 
 2. **Separate retail chatter from factual news.** East Money Guba user posts are opinion and momentum signals; posts from official information accounts or Tushare news are event/news inputs. Weight them differently.
 
@@ -156,74 +138,9 @@ East Money Guba is the primary domestic retail-investor discussion source. East 
 
 4. **Identify recurring domestic narratives.** Look for repeated themes such as order growth, sector rotation, financing flows, short-term price targets, valuation disputes, shareholder selling, policy expectations, and earnings catalysts.
 
-5. **Be explicit about data limits.** If a source is blocked, permission-limited, or sparse, say so. If Tushare returns a permission note, do not treat that as bearish; it is only a data-availability issue.
+5. **Be explicit about data limits.** If a source is blocked, permission-limited, or sparse, say so. If 10jqka does not expose stable post rows, state that it was not used as forum-post evidence. If Tushare returns a permission note, do not treat that as bearish; it is only a data-availability issue.
 
 6. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
-
-## Output fields
-
-Fill the following fields:
-
-- **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
-- **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
-- **confidence**: low / medium / high, based on data quality and sample size.
-- **narrative**: Full source-by-source breakdown, divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
-
-{get_language_instruction()}"""
-
-
-def _build_global_system_message(
-    *,
-    ticker: str,
-    start_date: str,
-    end_date: str,
-    news_block: str,
-    stocktwits_block: str,
-    reddit_block: str,
-) -> str:
-    """Assemble the sentiment-analyst system message with structured data blocks."""
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
-
-## Data sources (pre-fetched, in this prompt)
-
-### News headlines — Yahoo Finance, past 7 days
-Institutional framing. Fact-driven, slower-moving signal.
-
-<start_of_news>
-{news_block}
-<end_of_news>
-
-### StockTwits messages — retail-trader social platform indexed by cashtag
-Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
-
-<start_of_stocktwits>
-{stocktwits_block}
-<end_of_stocktwits>
-
-### Reddit posts — r/wallstreetbets, r/stocks, r/investing (past 7 days)
-Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
-
-<start_of_reddit>
-{reddit_block}
-<end_of_reddit>
-
-## How to analyze this data (best practices)
-
-1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
-
-2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
-
-3. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
-
-4. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
-
-5. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
-
-6. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this explicitly in the `confidence` field and the narrative. If the sources are silent on a given subreddit, say so.
-
-7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
-
-8. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
 
 ## Output fields
 
